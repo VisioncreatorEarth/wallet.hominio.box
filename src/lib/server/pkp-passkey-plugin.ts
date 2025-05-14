@@ -66,6 +66,16 @@ export const pkpPasskeyServerPlugin = () => ({
                     console.log('[pkpPasskeyPlugin:updateUserPasskeyInfo] ctx.body type:', typeof ctx.body);
                     console.log('[pkpPasskeyPlugin:updateUserPasskeyInfo] ctx.body content (raw):', JSON.stringify(ctx.body, null, 2));
 
+                    // First, check if pkp_passkey data already exists for this user
+                    const checkQuery = 'SELECT "pkp_passkey" FROM "user" WHERE id = $1';
+                    const checkResult: QueryResult = await db.query(checkQuery, [userId]);
+
+                    if (checkResult.rows.length > 0 && checkResult.rows[0].pkp_passkey) {
+                        console.warn(`[pkpPasskeyPlugin:updateUserPasskeyInfo] User ${userId} already has pkp_passkey data. Overwriting is not allowed.`);
+                        throw new APIError('CONFLICT', { status: 409, message: 'pkp_passkey data already exists for this user and cannot be overwritten.' });
+                    }
+                    // If pkp_passkey is null or user row didn't exist (though session implies it should), proceed.
+
                     if (ctx.body && typeof ctx.body === 'object' && ctx.body !== null && ('pkp_passkey' in ctx.body)) {
                         console.log('[pkpPasskeyPlugin:updateUserPasskeyInfo] Using ctx.body as request body.');
                         requestBody = ctx.body as PasskeyInfoBody;
