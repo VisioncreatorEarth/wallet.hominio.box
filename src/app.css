@@ -14,8 +14,6 @@
   --font-ibm-plex-sans: "IBM Plex Sans", sans-serif;
 }
 
-/* Global font imports will be moved to +layout.svelte via <link> tags */
-
 /* You might want to ensure a smooth scroll behavior globally if not handled by individual sections */
 :global(html) {
   scroll-behavior: smooth;

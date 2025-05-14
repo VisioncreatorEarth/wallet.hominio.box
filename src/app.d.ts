@@ -11,6 +11,10 @@ declare global {
 		// interface PageState {}
 		// interface Platform {}
 	}
+
+	interface Window {
+		ethereum?: any; // More specific type if available (e.g., EIP1193Provider)
+	}
 }
 
 export { };

@@ -25,7 +25,6 @@
 			{@const userDetails = allData.user}
 			{@const sessionInfo = allData.session}
 			{@const pkpPasskeyData = userDetails?.pkp_passkey}
-			{@const knownTopLevelKeys = ['user', 'session']}
 
 			<header class="mb-10 text-center md:text-left">
 				<h1 class="font-playfair-display text-prussian-blue text-4xl font-normal md:text-5xl">
