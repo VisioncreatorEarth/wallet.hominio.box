@@ -5,13 +5,20 @@
 		type WalletSetupState
 	} from '$lib/wallet/services/walletSetupOrchestrationService';
 	import {
+		getPermittedAuthMethodsForPkp,
+		getOwnedCapacityCredits,
+		type PermittedAuthMethod,
+		type CapacityCredit
+	} from '$lib/wallet/services/litService';
+	import {
 		viemWalletClientStore,
 		connectedAccountStore,
 		walletConnectionErrorStore
 	} from '$lib/stores/walletStore';
-	import { createWalletClient, custom, type WalletClient, type Address } from 'viem';
+	import { createWalletClient, custom, type WalletClient, type Address, type Hex } from 'viem';
 	import { gnosis } from 'viem/chains';
 	import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
+	import { browser } from '$app/environment';
 
 	const session = authClient.useSession();
 	let activeTab = $state('userDetails');
@@ -21,6 +28,8 @@
 		{ id: 'sessionInfo', label: 'Session Information' },
 		{ id: 'passkeyDetails', label: 'Passkey Details' },
 		{ id: 'walletManagement', label: 'Hominio Wallet' },
+		{ id: 'authMethods', label: 'Authorized Methods' },
+		{ id: 'capacityCredits', label: 'Capacity Credits' },
 		{ id: 'rawDebug', label: 'Raw Debug Data' }
 	];
 
@@ -41,21 +50,61 @@
 	// EOA Connection error store (shadows the imported store for local usage in template)
 	let eoaConnectionError = $state<string | null>(null);
 
+	// State for wallet details (capacity credits and auth methods) - NEW
+	let ownedCapacityCredits = $state<CapacityCredit[] | null>(null);
+	let permittedAuthMethods = $state<PermittedAuthMethod[] | null>(null);
+	let isLoadingWalletDetails = $state(false);
+	let walletDetailsError = $state<string | null>(null);
+
 	$effect(() => {
 		eoaWalletClient = $viemWalletClientStore;
 		eoaAccountAddress = $connectedAccountStore as Address | null;
 		eoaConnectionError = $walletConnectionErrorStore;
 	});
 
-	// Determine if wallet exists - Placeholder logic, needs refinement
-	// This should ideally check for a specific field confirming successful PKP setup, e.g., pkp_passkey.pkpEthAddress
-	let hasHominioWallet = $derived(
-		!!(
-			$session.data?.user?.pkp_passkey &&
-			typeof $session.data.user.pkp_passkey === 'object' &&
-			($session.data.user.pkp_passkey as ClientPkpPasskey).pkpEthAddress
-		)
+	let currentPkpData = $derived(
+		$session.data?.user?.pkp_passkey && typeof $session.data.user.pkp_passkey === 'object'
+			? ($session.data.user.pkp_passkey as ClientPkpPasskey)
+			: null
 	);
+
+	let hasHominioWallet = $derived(!!currentPkpData?.pkpEthAddress);
+
+	// Effect to fetch wallet details (auth methods, capacity credits) - NEW
+	$effect(() => {
+		async function fetchDetails() {
+			if (browser && currentPkpData?.pkpEthAddress && currentPkpData?.pkpTokenId) {
+				isLoadingWalletDetails = true;
+				walletDetailsError = null;
+				// Reset previous values
+				ownedCapacityCredits = null;
+				permittedAuthMethods = null;
+				console.log(
+					`[MePage] Fetching wallet details for PKP ETH: ${currentPkpData.pkpEthAddress}, Token ID: ${currentPkpData.pkpTokenId}`
+				);
+				try {
+					const [credits, methods] = await Promise.all([
+						getOwnedCapacityCredits(currentPkpData.pkpEthAddress),
+						getPermittedAuthMethodsForPkp(currentPkpData.pkpTokenId)
+					]);
+					ownedCapacityCredits = credits;
+					permittedAuthMethods = methods;
+					console.log('[MePage] Fetched Capacity Credits:', credits);
+					console.log('[MePage] Fetched Permitted Auth Methods:', methods);
+				} catch (err: any) {
+					console.error('[MePage] Error fetching wallet details:', err);
+					walletDetailsError = `Failed to fetch wallet details: ${err.message || 'Unknown error'}`;
+				} finally {
+					isLoadingWalletDetails = false;
+				}
+			} else {
+				// Clear details if no PKP info
+				ownedCapacityCredits = null;
+				permittedAuthMethods = null;
+			}
+		}
+		fetchDetails();
+	});
 
 	// ADDED: EOA Connection Logic (from +layout.svelte)
 	async function connectMetaMask() {
@@ -143,9 +192,60 @@
 			isWalletCreating = false;
 		}
 	}
+
+	// Helper functions (ported from legacy settings page) - NEW
+	function formatAuthMethodType(type: bigint): string {
+		switch (type) {
+			case 0n: // Assuming 0 is commonly "EOA Wallet" if not explicitly defined elsewhere
+				return 'EOA Wallet (Implied)';
+			case 1n: // As per legacy Lit.ts, this was used for passkeys with addPermittedAuthMethod
+				return 'Passkey (via EIP-1271 Verifier)';
+			case 2n:
+				return 'Lit Action';
+			case 3n:
+				return 'WebAuthn (Legacy)'; // From legacy example
+			case 4n:
+				return 'WebAuthn Passkey (General)'; // If this is a more general passkey
+			case 5n:
+				return 'Discord';
+			case 6n: // In our current setup, EIP-1271 passkey verifiers are added as AuthMethodType 6 by Lit's PKPHelper.
+				// However, the `getPermittedAuthMethodsForPkp` directly queries the PKPPermissions contract.
+				// The auth methods added by `mintPKPWithLitActionAuthAndCapacity` (which uses PKPHelper)
+				// are primarily Lit Actions (type 2) or implicitly the PKP itself.
+				// If a passkey is added via `pkpWallet.addPermittedAuthMethod({ authMethodType: 6, ...})`
+				// this would show up. For our flow, the Lit Action (type 2) is the key authorizer for passkeys.
+				// The passkey *itself* isn't typically registered as an auth method of type 6 *on the PKP NFT* in our setup.
+				// Instead, the Lit Action (type 2) is, and that Lit Action *uses* the EIP-1271 contract which *validates* the passkey.
+				// Let's keep 6 as 'Google' from legacy for now if it's general,
+				// but be mindful that our Passkey auth comes via the Lit Action.
+				return 'Google / EIP-1271 Address'; // Broadened to reflect its use for EIP-1271 (like Safe)
+			case 7n:
+				return 'Custom JWT';
+			default:
+				return `Unknown Type (${type})`;
+		}
+	}
+
+	function formatIpfsCid(hexId: Hex): string {
+		if (
+			!hexId ||
+			hexId.toLowerCase() === '0x' ||
+			hexId.toLowerCase() === '0x0000000000000000000000000000000000000000'
+		) {
+			return 'N/A (Not an IPFS Action)';
+		}
+		// Basic hex check, actual conversion to Base58 might be too complex here or not needed if only displaying hex.
+		// The legacy code didn't convert it back to Base58 for display if it was already hex.
+		return hexId;
+	}
+
+	function formatTimestamp(timestamp: bigint): string {
+		if (timestamp === 0n || !timestamp) return 'Never / Not Set';
+		return new Date(Number(timestamp) * 1000).toLocaleString();
+	}
 </script>
 
-<div class="bg-linen font-ibm-plex-sans text-prussian-blue min-h-screen p-4 pt-8 md:p-8">
+<div class="bg-linen font-ibm-plex-sans text-prussian-blue h-full min-h-screen p-4 pt-8 md:p-8">
 	<div class="mx-auto max-w-6xl">
 		{#if $session.data?.user}
 			{@const allData = $session.data as any}
@@ -170,6 +270,8 @@
 						{#each tabs as tab}
 							{#if tab.id === 'passkeyDetails' && !pkpPasskeyData}
 								<!-- Do not render Passkey Details tab if pkpPasskeyData is not present -->
+							{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits') && !hasHominioWallet}
+								<!-- Do not render Auth Methods or Capacity Credits if no Hominio Wallet -->
 							{:else if tab.id === 'walletManagement' && newPkpEthAddress && !hasHominioWallet}
 								<!-- If wallet just created but session not yet updated, still show wallet tab -->
 								<button
@@ -287,7 +389,7 @@
 							<h3
 								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
 							>
-								Passkey Details
+								Passkey & PKP Linkage
 							</h3>
 							<div class="space-y-3">
 								{#each Object.entries(pkpPasskeyData) as [key, value]}
@@ -427,6 +529,129 @@
 										</button>
 									{/if}
 								{/if}
+							{/if}
+						</div>
+					{/if}
+
+					<!-- Authorized Methods Section - NEW -->
+					{#if activeTab === 'authMethods'}
+						<div class="rounded-xl bg-white p-6 shadow-lg">
+							<h3
+								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
+							>
+								Authorized Methods for PKP
+							</h3>
+							{#if !hasHominioWallet}
+								<p class="text-prussian-blue/70 text-sm">
+									Please set up your Hominio Wallet to view authorized methods.
+								</p>
+							{:else if isLoadingWalletDetails}
+								<div class="flex items-center justify-start p-4">
+									<div class="spinner text-prussian-blue/80 mr-3 h-5 w-5"></div>
+									<p class="text-prussian-blue/80 text-sm">Loading authorized methods...</p>
+								</div>
+							{:else if walletDetailsError}
+								<div class="rounded-md bg-red-50 p-3">
+									<p class="text-sm text-red-700">
+										<span class="font-medium">Error:</span>
+										{walletDetailsError}
+									</p>
+								</div>
+							{:else if permittedAuthMethods && permittedAuthMethods.length > 0}
+								<ul class="divide-timberwolf-2/30 divide-y">
+									{#each permittedAuthMethods as method (method.id + method.authMethodType.toString())}
+										<li class="py-3">
+											<p class="text-prussian-blue/90 text-sm font-medium">
+												Type:
+												<span class="text-prussian-blue font-semibold"
+													>{formatAuthMethodType(method.authMethodType)}</span
+												>
+											</p>
+											{#if method.authMethodType === 2n}
+												<!-- Lit Action -->
+												<p class="text-prussian-blue/70 mt-1 text-xs">
+													Action IPFS CID (Hex):
+													<span class="font-mono break-all">{formatIpfsCid(method.id)}</span>
+												</p>
+											{:else if method.authMethodType === 1n || method.authMethodType === 4n || method.authMethodType === 6n}
+												<!-- Passkey or EOA based -->
+												<p class="text-prussian-blue/70 mt-1 text-xs">
+													Identifier / User PubKey on Contract (Hex):
+													<span class="font-mono break-all">{method.userPubkey || 'N/A'}</span>
+												</p>
+												{#if method.id !== method.userPubkey && method.id.length > 2}
+													<p class="text-prussian-blue/70 mt-1 text-xs">
+														Method ID (Hex):
+														<span class="font-mono break-all">{method.id}</span>
+													</p>
+												{/if}
+											{:else}
+												<!-- Other types -->
+												<p class="text-prussian-blue/70 mt-1 text-xs">
+													Method ID (Hex):
+													<span class="font-mono break-all">{method.id}</span>
+												</p>
+												{#if method.userPubkey && method.userPubkey.length > 2}
+													<p class="text-prussian-blue/70 mt-1 text-xs">
+														User PubKey on Contract (Hex):
+														<span class="font-mono break-all">{method.userPubkey}</span>
+													</p>
+												{/if}
+											{/if}
+										</li>
+									{/each}
+								</ul>
+							{:else}
+								<p class="text-prussian-blue/70 text-sm">
+									No permitted authentication methods found for this PKP.
+								</p>
+							{/if}
+						</div>
+					{/if}
+
+					<!-- Capacity Credits Section - NEW -->
+					{#if activeTab === 'capacityCredits'}
+						<div class="rounded-xl bg-white p-6 shadow-lg">
+							<h3
+								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
+							>
+								Capacity Credits for PKP
+							</h3>
+							{#if !hasHominioWallet}
+								<p class="text-prussian-blue/70 text-sm">
+									Please set up your Hominio Wallet to view capacity credits.
+								</p>
+							{:else if isLoadingWalletDetails}
+								<div class="flex items-center justify-start p-4">
+									<div class="spinner text-prussian-blue/80 mr-3 h-5 w-5"></div>
+									<p class="text-prussian-blue/80 text-sm">Loading capacity credits...</p>
+								</div>
+							{:else if walletDetailsError}
+								<div class="rounded-md bg-red-50 p-3">
+									<p class="text-sm text-red-700">
+										<span class="font-medium">Error:</span>
+										{walletDetailsError}
+									</p>
+								</div>
+							{:else if ownedCapacityCredits && ownedCapacityCredits.length > 0}
+								<ul class="divide-timberwolf-2/30 divide-y">
+									{#each ownedCapacityCredits as credit (credit.tokenId)}
+										<li class="py-3">
+											<p class="text-prussian-blue/90 text-sm font-medium">
+												Token ID:
+												<span class="text-prussian-blue font-mono text-xs">{credit.tokenId}</span>
+											</p>
+											<p class="text-prussian-blue/70 mt-1 text-xs">
+												Requests/KiloSec: {credit.requestsPerKilosecond.toString()}
+											</p>
+											<p class="text-prussian-blue/70 mt-1 text-xs">
+												Expires: {formatTimestamp(credit.expiresAt)}
+											</p>
+										</li>
+									{/each}
+								</ul>
+							{:else}
+								<p class="text-prussian-blue/70 text-sm">No capacity credits found for this PKP.</p>
 							{/if}
 						</div>
 					{/if}

@@ -426,3 +426,141 @@ export async function mintPKPWithLitActionAuthAndCapacity({
         throw new Error(`PKP Minting/Capacity Provisioning Failed: ${message}`);
     }
 }
+
+// --- NEW TYPE DEFINITIONS (Ported from legacy) ---
+export interface CapacityCredit {
+    tokenId: string;
+    requestsPerKilosecond: bigint;
+    expiresAt: bigint;
+}
+
+export interface PermittedAuthMethod {
+    authMethodType: bigint;
+    id: Hex; // This can be an IPFS CID for actions, or other identifiers
+    userPubkey: Hex; // For passkeys, this is the pubkey on the verifier contract. For others, could be 0x0.
+}
+
+/**
+ * Fetches all permitted authentication methods for a given PKP Token ID using direct Viem read.
+ * (Ported from legacy hominio/src/lib/wallet/lit.ts)
+ * @param pkpTokenId The Token ID of the PKP to query.
+ * @returns A promise that resolves to an array of permitted auth methods.
+ */
+export const getPermittedAuthMethodsForPkp = async (
+    pkpTokenId: string
+): Promise<PermittedAuthMethod[]> => {
+    if (!pkpTokenId || typeof pkpTokenId !== 'string' || !pkpTokenId.trim()) {
+        console.error("[litService] PKP Token ID is invalid or empty for getPermittedAuthMethodsForPkp:", pkpTokenId);
+        throw new Error("PKP Token ID cannot be empty or invalid.");
+    }
+
+    console.log(`[litService] Fetching permitted auth methods for PKP Token ID: ${pkpTokenId} via direct Viem read on chain ${currentChain.name} (ID: ${currentChain.id})`);
+
+    try {
+        const publicClient: PublicClient = createPublicClient({
+            chain: currentChain,
+            transport: http()
+        });
+
+        const permittedMethodsRaw = await publicClient.readContract({
+            address: PKP_PERMISSIONS_CONTRACT_ADDRESS,
+            abi: PKP_PERMISSIONS_ABI,
+            functionName: 'getPermittedAuthMethods',
+            args: [BigInt(pkpTokenId)]
+        });
+
+        console.log("[litService] Raw result from getPermittedAuthMethods:", permittedMethodsRaw);
+
+        if (!Array.isArray(permittedMethodsRaw)) {
+            console.error("[litService] Unexpected result format from getPermittedAuthMethods:", permittedMethodsRaw);
+            throw new Error('Contract read for permitted auth methods returned unexpected format.');
+        }
+
+        return permittedMethodsRaw.map(method => ({
+            authMethodType: method.authMethodType,
+            id: method.id,
+            userPubkey: method.userPubkey
+        }));
+
+    } catch (error: unknown) {
+        console.error('[litService] Error fetching permitted auth methods via Viem read:', error);
+        let message = 'Unknown error fetching permitted auth methods';
+        if (error instanceof Error) {
+            message = error.message;
+        }
+        throw new Error(`[litService] Failed to fetch permitted auth methods: ${message}`);
+    }
+};
+
+/**
+ * Fetches all Capacity Credit NFTs owned by a specific address.
+ * (Ported from legacy hominio/src/lib/wallet/lit.ts)
+ * @param ownerAddress The address of the owner.
+ * @param publicClientInput Optional Viem PublicClient configured for the current chain.
+ * @returns A promise that resolves to an array of owned capacity credits with their details.
+ */
+export const getOwnedCapacityCredits = async (
+    ownerAddress: Address,
+    publicClientInput?: PublicClient
+): Promise<CapacityCredit[]> => {
+    if (!ownerAddress) {
+        throw new Error("[litService] Owner address cannot be empty for getOwnedCapacityCredits.");
+    }
+
+    const client = publicClientInput || createPublicClient({ chain: currentChain, transport: http() });
+
+    console.log(`[litService] Fetching Capacity Credit NFTs for owner: ${ownerAddress} on chain ${currentChain.name} (ID: ${currentChain.id})`);
+
+    try {
+        const balance = await client.readContract({
+            address: RATE_LIMIT_NFT_CONTRACT_ADDRESS,
+            abi: RATE_LIMIT_NFT_ABI,
+            functionName: 'balanceOf',
+            args: [ownerAddress]
+        }) as bigint;
+
+        console.log(`[litService] Owner ${ownerAddress} has ${balance} Capacity Credit NFT(s).`);
+
+        if (balance === 0n) {
+            return [];
+        }
+
+        const ownedCredits: CapacityCredit[] = [];
+        for (let i = 0n; i < balance; i++) {
+            try {
+                const tokenIdBigInt = await client.readContract({
+                    address: RATE_LIMIT_NFT_CONTRACT_ADDRESS,
+                    abi: RATE_LIMIT_NFT_ABI,
+                    functionName: 'tokenOfOwnerByIndex',
+                    args: [ownerAddress, i]
+                }) as bigint;
+                const tokenId = tokenIdBigInt.toString();
+
+                const capacityDetails = await client.readContract({
+                    address: RATE_LIMIT_NFT_CONTRACT_ADDRESS,
+                    abi: RATE_LIMIT_NFT_ABI,
+                    functionName: 'capacity',
+                    args: [tokenIdBigInt]
+                }) as { requestsPerKilosecond: bigint; expiresAt: bigint };
+
+                ownedCredits.push({
+                    tokenId,
+                    requestsPerKilosecond: capacityDetails.requestsPerKilosecond,
+                    expiresAt: capacityDetails.expiresAt
+                });
+                console.log(`[litService] Fetched capacity details for token ID: ${tokenId}`, capacityDetails);
+            } catch (loopError) {
+                console.error(`[litService] Error fetching capacity details for token at index ${i}:`, loopError);
+            }
+        }
+        return ownedCredits;
+
+    } catch (error: unknown) {
+        console.error('[litService] Error fetching owned Capacity Credits:', error);
+        let message = 'Unknown error fetching owned Capacity Credits';
+        if (error instanceof Error) {
+            message = error.message;
+        }
+        throw new Error(`[litService] Failed to fetch owned Capacity Credits: ${message}`);
+    }
+};
