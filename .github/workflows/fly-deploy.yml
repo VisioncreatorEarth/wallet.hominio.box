@@ -21,11 +21,11 @@ jobs:
           flyctl secrets set \
             PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}" \
             BETTER_AUTH_URL="${{ secrets.PUBLIC_BASE_URL }}" \
-            BETTER_AUTH_SECRET="${{ secrets.SECRET_BETTER_AUTH_SECRET }}"
+            BETTER_AUTH_SECRET="${{ secrets.SECRET_BETTER_AUTH_SECRET }}" \
             SECRET_DATABASE_URL_AUTH="${{ secrets.SECRET_DATABASE_URL_AUTH }}" \
             SECRET_GOOGLE_CLIENT_ID="${{ secrets.SECRET_GOOGLE_CLIENT_ID }}" \
-            SECRET_GOOGLE_CLIENT_SECRET="${{ secrets.SECRET_GOOGLE_CLIENT_SECRET }}" \
+            SECRET_GOOGLE_CLIENT_SECRET="${{ secrets.SECRET_GOOGLE_CLIENT_SECRET }}"
       - name: Deploy to Fly.io
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only
+        run: flyctl deploy --remote-only --build-arg PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}"
