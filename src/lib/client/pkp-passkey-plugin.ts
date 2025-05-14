@@ -7,6 +7,7 @@ import type { pkpPasskeyServerPlugin } from '../server/pkp-passkey-plugin'; // A
 export interface ClientPkpPasskey {
     rawId: string;
     pubKey: string;
+    pkpEthAddress: string; // ADDED: The ETH address derived from the PKP public key
     passkeyVerifierContract?: string; // RENAMED
     username: string; // Added username
     pubkeyCoordinates: { // Added passkey public key coordinates
@@ -25,7 +26,7 @@ export interface UpdatePasskeyInfoClientArgs {
 export interface UpdatePasskeyInfoClientResponse {
     user: {
         id: string;
-        pkp_passkey: ClientPkpPasskey;
+        pkp_passkey: ClientPkpPasskey; // This will now include pkpEthAddress
     };
     // Include other potential fields from APIError if $fetch handles errors this way
     error?: { message: string; code?: string; status?: number };
@@ -33,7 +34,7 @@ export interface UpdatePasskeyInfoClientResponse {
 
 // Expected response from getUserPasskeyInfo
 export interface GetUserPasskeyInfoClientResponse {
-    pkp_passkey: ClientPkpPasskey | null;
+    pkp_passkey: ClientPkpPasskey | null; // This will now include pkpEthAddress if not null
     error?: { message: string; code?: string; status?: number };
 }
 
@@ -47,6 +48,7 @@ export interface CheckRawIdExistsClientResponse {
     exists: boolean;
     userId?: string;
     pkpPublicKey?: string;
+    pkpEthAddress?: string; // ADDED
     passkeyVerifierContract?: string; // RENAMED
     pkpTokenId?: string; // Added pkpTokenId
     error?: { message: string; code?: string; status?: number };
@@ -55,6 +57,7 @@ export interface CheckRawIdExistsClientResponse {
 export interface CheckRawIdExistsClientResponseSuccess {
     exists: boolean;
     pkpPublicKey?: string;          // PKP Public Key (hex format, 0x prefixed)
+    pkpEthAddress?: string; // ADDED
     userId?: string;                // User ID if exists
     passkeyVerifierContract?: string; // Address of the deployed EIP-1271 signer (0x prefixed)
     pkpTokenId?: string; // Added pkpTokenId

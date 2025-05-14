@@ -7,6 +7,7 @@ type QueryResult = pkg.QueryResult;
 interface PkpPasskey {
     rawId: string;
     pubKey: string; // This is the PKP Public Key
+    pkpEthAddress: string; // ADDED: The ETH address derived from the PKP public key
     passkeyVerifierContract?: string; // Address of the deployed EIP-1271 signer // RENAMED
     username: string; // Added username
     pubkeyCoordinates: { // Added passkey public key coordinates
@@ -44,7 +45,7 @@ export const pkpPasskeyServerPlugin = () => ({
         updateUserPasskeyInfo: createAuthEndpoint(
             '/pkp-passkey-plugin/update-user-passkey-info',
             { method: 'POST' },
-            async (ctx: any) => { // Use any for now
+            async (ctx: any) => { // REVERTED to any for now
                 console.log('[pkpPasskeyPlugin:updateUserPasskeyInfo] Endpoint hit (POST)');
                 let requestBody: PasskeyInfoBody | undefined;
                 const db = ctx.context.options.database;
@@ -101,10 +102,11 @@ export const pkpPasskeyServerPlugin = () => ({
                         !pkp_passkey.pubkeyCoordinates || // Check if object exists
                         typeof pkp_passkey.pubkeyCoordinates.x !== 'string' ||
                         typeof pkp_passkey.pubkeyCoordinates.y !== 'string' ||
-                        typeof pkp_passkey.pkpTokenId !== 'string' // Added pkpTokenId validation
+                        typeof pkp_passkey.pkpTokenId !== 'string' || // Added pkpTokenId validation
+                        typeof pkp_passkey.pkpEthAddress !== 'string' // ADDED: pkpEthAddress validation
                     ) {
-                        console.warn('[pkpPasskeyPlugin:updateUserPasskeyInfo] pkp_passkey object missing required fields (rawId, pubKey, username, pkpTokenId, pubkeyCoordinates.x, pubkeyCoordinates.y) or incorrect types.');
-                        throw new APIError('BAD_REQUEST', { status: 400, message: 'pkp_passkey object must contain rawId, pubKey, username, pkpTokenId as strings, and pubkeyCoordinates object with x and y strings.' });
+                        console.warn('[pkpPasskeyPlugin:updateUserPasskeyInfo] pkp_passkey object missing required fields (rawId, pubKey, pkpEthAddress, username, pkpTokenId, pubkeyCoordinates.x, pubkeyCoordinates.y) or incorrect types.');
+                        throw new APIError('BAD_REQUEST', { status: 400, message: 'pkp_passkey object must contain rawId, pubKey, pkpEthAddress, username, pkpTokenId as strings, and pubkeyCoordinates object with x and y strings.' });
                     }
                     // passkeyVerifierContract is optional
                     if (pkp_passkey.passkeyVerifierContract !== undefined && typeof pkp_passkey.passkeyVerifierContract !== 'string') {
@@ -116,6 +118,7 @@ export const pkpPasskeyServerPlugin = () => ({
                     const dataToStore: PkpPasskey = {
                         rawId: pkp_passkey.rawId,
                         pubKey: pkp_passkey.pubKey,
+                        pkpEthAddress: pkp_passkey.pkpEthAddress, // ADDED
                         username: pkp_passkey.username,
                         pubkeyCoordinates: {
                             x: pkp_passkey.pubkeyCoordinates.x,
@@ -161,7 +164,7 @@ export const pkpPasskeyServerPlugin = () => ({
         getUserPasskeyInfo: createAuthEndpoint(
             '/pkp-passkey-plugin/get-user-passkey-info',
             { method: 'GET' },
-            async (ctx: any) => { // Use any for now
+            async (ctx: any) => { // REVERTED to any for now
                 const db = ctx.context.options.database;
 
                 if (!db) {
@@ -200,7 +203,7 @@ export const pkpPasskeyServerPlugin = () => ({
         checkRawIdExists: createAuthEndpoint(
             '/pkp-passkey-plugin/check-rawid-exists',
             { method: 'POST' }, // Using POST to send rawId in body
-            async (ctx: any) => { // Use any for now
+            async (ctx: any) => { // REVERTED to any for now
                 console.log('[pkpPasskeyPlugin:checkRawIdExists] Endpoint hit');
                 let requestBody: { rawId?: string } | undefined;
                 const db = ctx.context.options.database;
@@ -256,7 +259,8 @@ export const pkpPasskeyServerPlugin = () => ({
                             userId: foundUser.id, // The user ID who has this rawId registered
                             pkpPublicKey: existingPkpData.pubKey,
                             passkeyVerifierContract: existingPkpData.passkeyVerifierContract,
-                            pkpTokenId: existingPkpData.pkpTokenId // Added pkpTokenId to response
+                            pkpTokenId: existingPkpData.pkpTokenId, // Added pkpTokenId to response
+                            pkpEthAddress: existingPkpData.pkpEthAddress // ADDED
                         };
                     } else {
                         console.log(`[pkpPasskeyPlugin:checkRawIdExists] rawId ${rawIdToCheck} not found.`);
