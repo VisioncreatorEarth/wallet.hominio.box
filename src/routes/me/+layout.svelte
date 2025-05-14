@@ -8,7 +8,8 @@
 		type WalletClient
 	} from 'viem';
 	import { gnosis } from 'viem/chains';
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, setContext } from 'svelte';
+	import { writable, type Writable } from 'svelte/store';
 	import {
 		chainNameStore,
 		viemPublicClientStore,
@@ -17,7 +18,11 @@
 		walletConnectionErrorStore
 	} from '$lib/stores/walletStore';
 
+	import { initializeLitClient } from '$lib/wallet/lit-connect';
+	import type { LitNodeClient } from '@lit-protocol/lit-node-client';
+
 	let publicClientInstance: PublicClient;
+	const litClientStore: Writable<LitNodeClient | null> = writable(null);
 
 	async function connectMetaMask() {
 		$walletConnectionErrorStore = null;
@@ -48,21 +53,46 @@
 		$walletConnectionErrorStore = null;
 	}
 
-	onMount(() => {
+	onMount(async () => {
 		publicClientInstance = createPublicClient({
 			chain: gnosis,
 			transport: http()
 		});
 		$viemPublicClientStore = publicClientInstance;
 		$chainNameStore = gnosis.name;
+
+		// Set the store in context synchronously
+		setContext('litClientStore', litClientStore);
+
+		// Initialize Lit Client Asynchronously and update the store
+		try {
+			console.log('[ME Layout] Initializing Lit Client...');
+			const client = await initializeLitClient();
+			litClientStore.set(client); // Update the store with the initialized client
+			console.log('[ME Layout] Lit Client initialized and store updated.');
+		} catch (err) {
+			console.error('[ME Layout] Failed to initialize Lit Client:', err);
+			litClientStore.set(null); // Ensure store is null on error
+			// Optionally, set an error state or notify the user
+		}
 	});
 
-	onDestroy(() => {
+	onDestroy(async () => {
 		$chainNameStore = null;
 		$viemPublicClientStore = null;
-		// Clear wallet-specific stores if the user navigates away from /me section
-		// or if a disconnect happens, which is handled by disconnectMetaMask too.
 		disconnectMetaMask();
+
+		// Disconnect Lit Client from store
+		const client = $litClientStore; // Get client from store
+		if (client && client.ready) {
+			try {
+				await client.disconnect();
+				console.log('[ME Layout] Disconnected from Lit Network.');
+			} catch (error) {
+				console.error('[ME Layout] Error disconnecting from Lit Network:', error);
+			}
+		}
+		litClientStore.set(null); // Reset store on destroy
 	});
 </script>
 
@@ -88,6 +118,21 @@
 			>
 				Connect MetaMask (Gnosis)
 			</button>
+		{/if}
+
+		<!-- Lit Protocol Connection Status -->
+		{#if $litClientStore && $litClientStore.ready}
+			<span class="rounded-md bg-blue-100 px-2 py-1 font-mono text-xs text-blue-700">
+				Lit Connected
+			</span>
+		{:else if $litClientStore && !$litClientStore.ready}
+			<span class="rounded-md bg-yellow-100 px-2 py-1 font-mono text-xs text-yellow-700">
+				Lit Connecting...
+			</span>
+		{:else}
+			<span class="rounded-md bg-gray-100 px-2 py-1 font-mono text-xs text-gray-700">
+				Lit Not Connected
+			</span>
 		{/if}
 	</div>
 	{#if $walletConnectionErrorStore && !$connectedAccountStore}
