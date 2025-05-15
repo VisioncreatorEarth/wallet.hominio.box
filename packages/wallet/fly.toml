@@ -7,7 +7,7 @@ app = 'wallet-hominio-box'
 primary_region = 'fra'
 
 [build]
-dockerfile = "packages/wallet/Dockerfile"
+dockerfile = "Dockerfile"
 
 [http_service]
 internal_port = 3000
