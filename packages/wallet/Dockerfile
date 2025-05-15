@@ -35,7 +35,7 @@ COPY .npmrc ./.npmrc
 # Install dependencies based on root lockfile
 # Ensure svelte-kit sync runs (usually part of prepare script in package.json, triggered by install)
 # We need to set the CWD for bun install to the app directory where package.json now is
-RUN bun install --frozen-lockfile
+RUN bun install # Temporarily removed --frozen-lockfile for diagnostics
 
 # Copy application code from packages/wallet context into the /app directory
 COPY packages/wallet/. ./
