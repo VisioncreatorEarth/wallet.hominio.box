@@ -512,11 +512,13 @@
 									</div>
 								{:else}
 									<div
-										class="mb-4 flex items-center justify-between rounded-lg border border-green-300 bg-green-50 p-3"
+										class="mb-4 flex items-center justify-between rounded-lg border border-[var(--color-moss-green)] bg-[var(--color-moss-green)]/10 p-3"
 									>
 										<div>
-											<p class="text-sm font-medium text-green-700">EOA Wallet Connected:</p>
-											<p class="font-mono text-xs break-all text-green-600">
+											<p class="text-sm font-medium text-[var(--color-moss-green)]">
+												EOA Wallet Connected:
+											</p>
+											<p class="font-mono text-xs break-all text-[var(--color-prussian-blue)]/80">
 												{eoaAccountAddress}
 											</p>
 										</div>
@@ -553,10 +555,16 @@
 										<p class="my-3 text-sm text-red-600">Error: {walletCreationError}</p>
 									{/if}
 									{#if newPkpEthAddress}
-										<div class="my-3 rounded-lg border border-emerald-300 bg-emerald-50 p-4">
-											<p class="font-semibold text-emerald-700">Wallet Created Successfully!</p>
-											<p class="text-xs text-emerald-600">Your new Hominio Wallet Address:</p>
-											<p class="font-mono text-sm break-all text-emerald-800">
+										<div
+											class="my-3 rounded-lg border border-[var(--color-moss-green)] bg-[var(--color-moss-green)]/10 p-4"
+										>
+											<p class="font-semibold text-[var(--color-moss-green)]">
+												Wallet Created Successfully!
+											</p>
+											<p class="text-xs text-[var(--color-moss-green)]/80">
+												Your new Hominio Wallet Address:
+											</p>
+											<p class="font-mono text-sm break-all text-[var(--color-prussian-blue)]">
 												{newPkpEthAddress}
 											</p>
 											<p class="mt-2 text-xs text-slate-500">
@@ -707,13 +715,13 @@
 								<div class="space-y-3">
 									<button
 										onclick={() => openSignMessageModalFromLayout?.()}
-										class="focus:ring-persian-orange mt-2 w-full rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+										class="mt-2 w-full rounded-lg bg-[var(--color-prussian-blue)] px-5 py-2.5 text-sm font-medium text-[var(--color-linen)] transition-colors hover:brightness-90 focus:ring-2 focus:ring-[var(--color-persian-orange)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 									>
 										Sign Test Message
 									</button>
 									<button
 										onclick={() => openExecute42ActionModalFromLayout?.()}
-										class="focus:ring-persian-orange mt-2 w-full rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+										class="mt-2 w-full rounded-lg bg-[var(--color-prussian-blue)] px-5 py-2.5 text-sm font-medium text-[var(--color-linen)] transition-colors hover:brightness-90 focus:ring-2 focus:ring-[var(--color-persian-orange)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 									>
 										Execute Test Lit Action (42)
 									</button>
