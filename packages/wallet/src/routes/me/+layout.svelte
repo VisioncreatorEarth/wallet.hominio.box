@@ -1,10 +1,14 @@
 <script lang="ts">
+	let { children } = $props();
+
 	import {
 		createPublicClient,
 		// createWalletClient, // Not needed directly in this layout anymore for EOA connection
 		http,
 		// custom, // Not needed directly in this layout anymore for EOA connection
-		type PublicClient
+		type PublicClient,
+		type Hex,
+		type Address
 		// type WalletClient // Not needed directly in this layout anymore for EOA connection
 	} from 'viem';
 	import { gnosis } from 'viem/chains';
@@ -27,6 +31,11 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 
+	// ADDED: Imports for Sign Message Modal
+	import SignMessage from '$lib/components/SignMessage.svelte';
+	import { signMessageWithPkp } from '$lib/wallet/services/litSigningService';
+	import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
+
 	let publicClientInstance: PublicClient;
 	const litClientStore: Writable<LitNodeClient | null> = writable(null);
 
@@ -42,6 +51,20 @@
 	const session = authClient.useSession();
 	let signOutLoading = $state(false);
 
+	// ADDED: State for Sign Message Modal
+	let isSignMessageModalOpen = $state(false);
+	let isSigningMessage = $state(false);
+	let messageSignature = $state<Hex | null>(null);
+	let messageSigningError = $state<string | null>(null);
+
+	// ADDED: Derived data for PKP Passkey and wallet status
+	let currentPkpData = $derived(
+		$session.data?.user?.pkp_passkey && typeof $session.data.user.pkp_passkey === 'object'
+			? ($session.data.user.pkp_passkey as ClientPkpPasskey)
+			: null
+	);
+	let hasHominioWallet = $derived(!!currentPkpData?.pkpEthAddress);
+
 	async function handleSignOut() {
 		if (!browser) return;
 		signOutLoading = true;
@@ -54,6 +77,46 @@
 		} finally {
 			signOutLoading = false;
 		}
+	}
+
+	// ADDED: Handlers for SignMessage component events
+	async function handleSignRequest(event: CustomEvent<string>) {
+		const messageToSign = event.detail;
+		isSigningMessage = true;
+		messageSignature = null;
+		messageSigningError = null;
+
+		if (
+			!currentPkpData?.pkpTokenId ||
+			!currentPkpData?.pubKey ||
+			!currentPkpData.rawId ||
+			!currentPkpData.passkeyVerifierContract
+		) {
+			messageSigningError =
+				'PKP details (Token ID, Public Key) or Passkey information not found in session. Cannot sign.';
+			isSigningMessage = false;
+			return;
+		}
+
+		const result = await signMessageWithPkp(
+			messageToSign,
+			currentPkpData.pkpTokenId,
+			currentPkpData.pubKey as Hex,
+			currentPkpData.rawId as Hex,
+			currentPkpData.passkeyVerifierContract as Address
+		);
+
+		if ('signature' in result) {
+			messageSignature = result.signature;
+		} else {
+			messageSigningError = result.error;
+		}
+		isSigningMessage = false;
+	}
+
+	function handleClearSignature() {
+		messageSignature = null;
+		messageSigningError = null;
 	}
 
 	onMount(async () => {
@@ -239,7 +302,87 @@
 			</nav>
 		</header>
 	{/if}
-	<div class="bg-background-app flex-grow overflow-hidden">
-		<slot />
+	<div class="bg-background-app relative flex-grow overflow-hidden">
+		{@render children()}
+
+		<!-- ADDED: Modal Trigger Button -->
+		{#if $session.data?.user && hasHominioWallet}
+			<button
+				onclick={() => {
+					isSignMessageModalOpen = true;
+					// Clear previous results when opening modal
+					messageSignature = null;
+					messageSigningError = null;
+				}}
+				class="focus:ring-persian-orange bg-persian-orange fixed bottom-6 left-1/2 z-50 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full p-3 text-white shadow-lg transition-transform hover:scale-105 focus:ring-2 focus:outline-none"
+				title="Sign Message"
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-6 w-6"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					stroke-width="2"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+					/>
+				</svg>
+			</button>
+		{/if}
+
+		<!-- ADDED: Sign Message Modal -->
+		{#if isSignMessageModalOpen && currentPkpData}
+			<div
+				class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+				onclick={(event) => {
+					if (event.target === event.currentTarget) {
+						isSignMessageModalOpen = false;
+					}
+				}}
+			>
+				<div class="bg-background-surface w-full max-w-lg rounded-xl p-6 shadow-2xl">
+					<div class="mb-4 flex items-center justify-between">
+						<h3 class="text-prussian-blue text-xl font-semibold">Sign a Message</h3>
+						<button
+							onclick={() => (isSignMessageModalOpen = false)}
+							class="text-prussian-blue/70 hover:text-prussian-blue rounded-full p-1 text-2xl leading-none focus:outline-none"
+							aria-label="Close modal"
+						>
+							&times;
+						</button>
+					</div>
+					<SignMessage
+						pkpPublicKey={currentPkpData.pubKey as Hex}
+						passkeyRawId={currentPkpData.rawId as Hex}
+						passkeyVerifierContractAddress={currentPkpData.passkeyVerifierContract as Address}
+						isSigningProcessActive={isSigningMessage}
+						signatureResult={messageSignature}
+						signingErrorDetail={messageSigningError}
+						on:sign={handleSignRequest}
+						on:clear={handleClearSignature}
+					/>
+				</div>
+			</div>
+		{/if}
 	</div>
+	{#if !$session.data?.user}
+		<div class="py-16 text-center">
+			<h1 class="font-playfair-display text-prussian-blue mb-6 text-4xl font-normal md:text-5xl">
+				Access Denied
+			</h1>
+			<p class="text-prussian-blue/80 text-xl">You need to be signed in to view this page.</p>
+			<p class="mt-10">
+				<a
+					href="/"
+					class="font-ibm-plex-sans bg-prussian-blue text-linen focus:ring-persian-orange focus:ring-opacity-50 inline-block rounded-full px-10 py-3 text-lg font-bold shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-xl focus:ring-2 focus:outline-none"
+				>
+					Go to Homepage
+				</a>
+			</p>
+		</div>
+	{/if}
 </div>

@@ -23,8 +23,8 @@
 	import type { Writable } from 'svelte/store';
 
 	// NEW: Import SignMessage component and signing service
-	import SignMessage from '$lib/components/wallet/SignMessage.svelte';
-	import { signMessageWithPkp } from '$lib/wallet/services/litSigningService';
+	// import SignMessage from '$lib/components/SignMessage.svelte';
+	// import { signMessageWithPkp } from '$lib/wallet/services/litSigningService';
 
 	interface MobileMenuStore {
 		isOpen: boolean;
@@ -44,7 +44,7 @@
 		{ id: 'walletManagement', label: 'Hominio Wallet' },
 		{ id: 'authMethods', label: 'Authorized Methods' },
 		{ id: 'capacityCredits', label: 'Capacity Credits' },
-		{ id: 'signMessage', label: 'Sign Message' }, // NEW: Sign Message Tab
+		// REMOVED: { id: 'signMessage', label: 'Sign Message' },
 		{ id: 'rawDebug', label: 'Raw Debug Data' }
 	];
 
@@ -71,10 +71,10 @@
 	let isLoadingWalletDetails = $state(false);
 	let walletDetailsError = $state<string | null>(null);
 
-	// NEW: State for message signing
-	let isSigningMessage = $state(false);
-	let messageSignature = $state<Hex | null>(null);
-	let messageSigningError = $state<string | null>(null);
+	// REMOVED: State for message signing
+	// let isSigningMessage = $state(false);
+	// let messageSignature = $state<Hex | null>(null);
+	// let messageSigningError = $state<string | null>(null);
 
 	$effect(() => {
 		eoaWalletClient = $viemWalletClientStore;
@@ -122,6 +122,8 @@
 		}
 		fetchDetails();
 	});
+
+	// REMOVED: Handlers for SignMessage component events (handleSignRequest, handleClearSignature)
 
 	async function connectMetaMask() {
 		walletConnectionErrorStore.set(null);
@@ -207,47 +209,6 @@
 		} finally {
 			isWalletCreating = false;
 		}
-	}
-
-	// NEW: Handlers for SignMessage component events
-	async function handleSignRequest(event: CustomEvent<string>) {
-		const messageToSign = event.detail;
-		isSigningMessage = true;
-		messageSignature = null;
-		messageSigningError = null;
-
-		if (
-			!currentPkpData?.pkpTokenId ||
-			!currentPkpData?.pubKey ||
-			!currentPkpData.rawId ||
-			!currentPkpData.passkeyVerifierContract
-		) {
-			messageSigningError =
-				'PKP details (Token ID, Public Key) or Passkey information not found in session. Cannot sign.';
-			isSigningMessage = false;
-			return;
-		}
-
-		const result = await signMessageWithPkp(
-			messageToSign,
-			currentPkpData.pkpTokenId,
-			currentPkpData.pubKey as Hex,
-			currentPkpData.rawId as Hex,
-			currentPkpData.passkeyVerifierContract as Address
-		);
-
-		if ('signature' in result) {
-			messageSignature = result.signature;
-		} else {
-			messageSigningError = result.error;
-		}
-		isSigningMessage = false;
-	}
-
-	function handleClearSignature() {
-		messageSignature = null;
-		messageSigningError = null;
-		// The message in the component's textarea is managed by the component itself.
 	}
 
 	function formatAuthMethodType(type: bigint): string {
@@ -349,7 +310,7 @@
 						{#each tabs as tab}
 							{#if tab.id === 'passkeyDetails' && !pkpPasskeyData}
 								<!-- Do not render -->
-							{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits' || tab.id === 'signMessage') && !hasHominioWallet}
+							{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits') /* REMOVED: || tab.id === 'signMessage' */ && !hasHominioWallet}
 								<!-- Do not render these if no Hominio Wallet -->
 							{:else if tab.id === 'walletManagement' && newPkpEthAddress && !hasHominioWallet}
 								<button
@@ -733,27 +694,6 @@
 								{/if}
 							</div>
 						</div>
-					{/if}
-
-					{#if activeTab === 'signMessage'}
-						{#if hasHominioWallet && currentPkpData}
-							<SignMessage
-								pkpPublicKey={currentPkpData.pubKey as Hex}
-								passkeyRawId={currentPkpData.rawId as Hex}
-								passkeyVerifierContractAddress={currentPkpData.passkeyVerifierContract as Address}
-								isSigningProcessActive={isSigningMessage}
-								signatureResult={messageSignature}
-								signingErrorDetail={messageSigningError}
-								on:sign={handleSignRequest}
-								on:clear={handleClearSignature}
-							/>
-						{:else}
-							<div class="bg-background-surface rounded-xl p-6 shadow-xs">
-								<p class="text-prussian-blue/70 text-sm">
-									Please set up your Hominio Wallet to sign messages.
-								</p>
-							</div>
-						{/if}
 					{/if}
 
 					{#if activeTab === 'rawDebug'}
