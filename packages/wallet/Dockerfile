@@ -29,7 +29,7 @@ ENV PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
 # Copy package-specific files and root lockfile/npmrc
 # Assumes the Docker build context is the MONOREPO ROOT
 COPY packages/wallet/package.json ./package.json
-COPY bun.lockb ./bun.lockb
+COPY bun.lock ./bun.lockb
 COPY .npmrc ./.npmrc
 
 # Install dependencies based on root lockfile
@@ -54,9 +54,9 @@ FROM base
 WORKDIR /app
 
 # Copy built application and production node_modules
-COPY --from=build /app/build ./build
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/package.json ./package.json # For CMD script
+COPY --from=build /app/build ./build/
+COPY --from=build /app/node_modules ./node_modules/
+COPY --from=build /app/package.json ./
 
 # Start the server by default, this can be overwritten at runtime
 EXPOSE 3000
