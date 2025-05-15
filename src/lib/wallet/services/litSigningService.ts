@@ -1,16 +1,24 @@
 import { LitPKPResource, LitActionResource } from "@lit-protocol/auth-helpers";
-import { getLitClient } from './LitService'; // Ensure correct casing
+import { getLitClient } from './litService'; // Assuming filename is litService.ts (lowercase)
 import { passkeyVerifierLitActionCode } from "../lit-actions/passkeyVerifier";
 import { EIP_1271_MAGIC_VALUE, formatSignatureForEIP1271 } from './contractService';
 import { gnosis } from 'viem/chains';
 import { type Hex, type Address, hashMessage, toBytes, bytesToHex } from 'viem';
+import { publicKeyToAddress } from 'viem/utils'; // Added for deriving address
 import { Buffer } from 'buffer';
-import * as ipfsOnlyHash from 'ipfs-only-hash';
+// import * as ipfsOnlyHash from 'ipfs-only-hash'; // Removed as unused
 
 import type {
-
-    LitResourceAbilityRequest // This type IS used for resourceAbilityRequests array
+    // AuthSig, // Assuming AuthSig is not directly used here now, review if needed
+    // SessionSigsMap, // REMOVED as no longer used
+    // PKPSignShare, // If used by pkpSign or related calls - REMOVED AS UNUSED
+    // JsonExecutionRequest, // If used by executeJs or related calls - REMOVED AS UNUSED
+    LitResourceAbilityRequest,
+    AuthSig, // Added AuthSig type
+    SessionSigsMap // Added SessionSigsMap for clarity, though getPkpSessionSigs/getLitActionSessionSigs return it
 } from '@lit-protocol/types';
+
+const LIT_WALLET_SIG_STORAGE_KEY = 'lit-wallet-sig'; // Key used by Lit SDK
 
 /**
  * Prepares the jsParams object required for executing the passkey verifier Lit Action.
@@ -112,8 +120,18 @@ interface AuthenticatorAssertionResponse extends AuthenticatorResponse {
     readonly userHandle?: ArrayBuffer | null | undefined;
 }
 
+// Helper to parse the expiration from a SIWE message
+function getExpirationFromSiweMessage(message: string): Date | null {
+    const expirationMatch = message.match(/Expiration Time: (.*)/);
+    if (expirationMatch && expirationMatch[1]) {
+        return new Date(expirationMatch[1]);
+    }
+    return null;
+}
+
 /**
- * Signs a message using the user's PKP, authorized by a passkey-verifying Lit Action.
+ * Signs a message using the user's PKP.
+ * Attempts to use a stored AuthSig first, falls back to Lit Action (passkey prompt).
  */
 export async function signMessageWithPkp(
     messageToSign: string,
@@ -121,98 +139,138 @@ export async function signMessageWithPkp(
     pkpPublicKey: Hex,
     passkeyRawId: Hex,
     passkeyVerifierContractAddress: Address
-    // capacityDelegationAuthSig: AuthSig // REMOVED
 ): Promise<{ signature: Hex } | { error: string }> {
     const litNodeClient = await getLitClient();
     if (!litNodeClient.ready) {
         return { error: 'Lit Client not ready when starting signMessageWithPkp.' };
     }
 
-    console.log('[litSigningService] signMessageWithPkp called with pkpTokenId:', pkpTokenId);
+    console.log('[litSigningService] signMessageWithPkp called.');
+    const digestToSign = toBytes(hashMessage(messageToSign));
+    let sessionSigs: SessionSigsMap | undefined = undefined;
 
+    // Attempt 1: Try to use stored AuthSig (lit-wallet-sig) with getPkpSessionSigs
+    console.log('[litSigningService] Attempt 1: Trying to use stored AuthSig (lit-wallet-sig).');
     try {
-        // 0. Compute IPFS CID (Qm... string) of the Lit Action code
-        const actionCodeBuffer = Buffer.from(passkeyVerifierLitActionCode);
-        const computedCidString = await ipfsOnlyHash.of(actionCodeBuffer);
-        console.log('[litSigningService] Computed IPFS CID string (Qm... format):', computedCidString);
-        console.log('[litSigningService] Expected authorized Action IPFS CID (Hex from UI):', "0x1220f3cc29834a0a64849c9e6c0f52ec2261433e3d7bf0d199d90087d018d49fac1c");
+        const storedAuthSigString = localStorage.getItem(LIT_WALLET_SIG_STORAGE_KEY);
+        if (storedAuthSigString) {
+            const authSig: AuthSig = JSON.parse(storedAuthSigString);
+            console.log('[litSigningService] Found stored AuthSig:', authSig);
 
-        // 1. Generate a challenge for passkey assertion
-        const passkeyChallenge = crypto.getRandomValues(new Uint8Array(32));
+            // Optional: Check expiration of the AuthSig itself
+            const authSigExpiration = getExpirationFromSiweMessage(authSig.signedMessage);
+            if (authSigExpiration && authSigExpiration < new Date()) {
+                console.warn('[litSigningService] Stored AuthSig has expired. Proceeding to fallback.');
+            } else {
+                // Derive Ethereum address from the current PKP public key for comparison
+                const currentPkpEthAddress = publicKeyToAddress(pkpPublicKey);
 
-        // 2. Prepare jsParams for the Lit Action
-        const paramsResult = await prepareLitActionJsParams(
-            passkeyRawId,
-            passkeyVerifierContractAddress,
-            passkeyChallenge
-        );
+                // Ensure pkpPublicKey matches the address in the AuthSig for safety
+                if (authSig.address.toLowerCase() !== currentPkpEthAddress.toLowerCase()) {
+                    console.warn(`[litSigningService] Stored AuthSig address (${authSig.address}) does not match current PKP ETH address (${currentPkpEthAddress}). Proceeding to fallback.`);
+                } else {
+                    const resourceAbilityRequests: LitResourceAbilityRequest[] = [
+                        {
+                            resource: new LitPKPResource('*'), // Or use pkpTokenId for specificity: new LitPKPResource(pkpTokenId)
+                            ability: 'pkp-signing',
+                        },
+                    ];
 
-        if ('error' in paramsResult) {
-            return { error: `Failed to prepare Lit Action JS params: ${paramsResult.error}` };
-        }
-        const { jsParams } = paramsResult;
-
-        // 3. Define Resource Ability Requests for the Session Sigs
-        const currentPkpResource = new LitPKPResource('*'); // Use wildcard for PKP resource
-        const currentActionResource = new LitActionResource(computedCidString);
-
-        const resourceAbilityRequests: LitResourceAbilityRequest[] = [
-            {
-                resource: currentPkpResource,
-                ability: 'pkp-signing'
-            },
-            {
-                resource: currentActionResource,
-                ability: 'lit-action-execution'
+                    console.log('[litSigningService] Calling getPkpSessionSigs with stored AuthSig.');
+                    sessionSigs = await litNodeClient.getPkpSessionSigs({
+                        pkpPublicKey: pkpPublicKey, // Must match the PKP this AuthSig is for
+                        authMethods: [{
+                            authMethodType: 1, // AuthSig
+                            accessToken: storedAuthSigString, // The stringified AuthSig object
+                        }],
+                        resourceAbilityRequests,
+                        // Expiration for the new SessionSigs we are generating NOW
+                        expiration: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                    });
+                    console.log('[litSigningService] Successfully obtained SessionSigs using stored AuthSig.');
+                }
             }
-        ];
-
-        // 4. Get Session Sigs using the Lit Action as the authentication method
-        console.log('[litSigningService] Getting session sigs with PKP:', pkpPublicKey, 'Action IPFS ID:', computedCidString);
-
-        const sessionSigs = await litNodeClient.getLitActionSessionSigs({
-            pkpPublicKey,
-            litActionCode: Buffer.from(passkeyVerifierLitActionCode).toString('base64'),
-            jsParams,
-            resourceAbilityRequests,
-            authMethods: [],
-            capabilityAuthSigs: [], // CHANGED: No explicit capacity delegation AuthSig for now
-            expiration: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-            chain: 'ethereum',
-        });
-
-        console.log('[litSigningService] Successfully obtained SessionSigs:', sessionSigs);
-
-        // 5. Prepare the message digest for pkpSign
-        const messageDigest = hashMessage(messageToSign);
-        const digestToSign = toBytes(messageDigest);
-
-        // 6. Sign the digest with the PKP
-        const pkpSignResult = await litNodeClient.pkpSign({
-            sessionSigs: sessionSigs,
-            toSign: digestToSign,
-            pubKey: pkpPublicKey,
-        });
-
-        console.log("[litSigningService] PKP Sign Result:", pkpSignResult);
-
-        if (!pkpSignResult || !pkpSignResult.signature) {
-            return { error: "Failed to sign message with PKP or signature missing in result." };
+        } else {
+            console.log('[litSigningService] No stored AuthSig found.');
         }
+    } catch (e: unknown) {
+        console.warn(`[litSigningService] Attempt 1 failed (using stored AuthSig): ${e instanceof Error ? e.message : String(e)}. Proceeding to fallback.`);
+        sessionSigs = undefined; // Ensure sessionSigs is undefined if this attempt fails
+    }
 
-        return { signature: pkpSignResult.signature as Hex };
 
-    } catch (error: unknown) {
-        console.error('[litSigningService] Error in signMessageWithPkp:', error);
-        let message = 'An unknown error occurred during message signing.';
-        if (error instanceof Error) {
-            message = error.message;
-            type LitErrorWithCode = Error & { errorCode?: string | number };
-            const litError = error as LitErrorWithCode;
-            if (litError.errorCode) {
-                message = `Lit SDK Error (${litError.errorCode}): ${litError.message}`;
+    // Attempt 2 (Fallback/Initial Run): Use Lit Action for authentication if Attempt 1 failed
+    if (!sessionSigs) {
+        console.log('[litSigningService] Attempt 2 (Fallback/Initial Run): Using Lit Action for authentication.');
+        try {
+            // const actionCodeBuffer = Buffer.from(passkeyVerifierLitActionCode); // Removed as unused
+            // const computedCidString = await ipfsOnlyHash.of(actionCodeBuffer); // Not strictly needed if using litActionCode directly
+
+            const passkeyChallenge = crypto.getRandomValues(new Uint8Array(32));
+            console.log('[litSigningService] Fallback: Preparing Lit Action JS Params (will prompt passkey)...');
+            const paramsResult = await prepareLitActionJsParams(
+                passkeyRawId,
+                passkeyVerifierContractAddress,
+                passkeyChallenge
+            );
+
+            if ('error' in paramsResult) {
+                return { error: `Fallback: Failed to prepare Lit Action JS params: ${paramsResult.error}` };
             }
+            const { jsParams } = paramsResult;
+
+            const resourceAbilityRequests: LitResourceAbilityRequest[] = [
+                {
+                    resource: new LitPKPResource('*'),
+                    ability: 'pkp-signing'
+                },
+                {
+                    // resource: new LitActionResource(computedCidString), // Use CID if action is pre-registered & referred by CID
+                    resource: new LitActionResource('*'), // Or wildcard if action code is passed directly & not pre-registered for specific CID scoping here
+                    ability: 'lit-action-execution'
+                }
+            ];
+
+            console.log('[litSigningService] Fallback: Calling getLitActionSessionSigs...');
+            sessionSigs = await litNodeClient.getLitActionSessionSigs({
+                pkpPublicKey,
+                litActionCode: Buffer.from(passkeyVerifierLitActionCode).toString('base64'),
+                jsParams,
+                resourceAbilityRequests,
+                authMethods: [], // AuthMethods for inside the Lit Action, not for the session sigs themselves here
+                expiration: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Expiration for the SessionSigs
+                chain: 'ethereum', // Or your target chain
+            });
+            console.log('[litSigningService] Fallback: Successfully obtained SessionSigs via Lit Action.');
+            // At this point, if successful, the SDK should have stored/updated lit-wallet-sig
+        } catch (fallbackError: unknown) {
+            console.error('[litSigningService] Error in fallback signing mechanism (getLitActionSessionSigs):', fallbackError);
+            const message = fallbackError instanceof Error ? fallbackError.message : 'An unknown error occurred during fallback Lit Action authentication.';
+            return { error: `Sign message failed via Lit Action fallback: ${message}` };
         }
-        return { error: `Sign message failed: ${message}` };
+    }
+
+    // If we have sessionSigs (from either attempt), proceed to sign
+    if (sessionSigs) {
+        try {
+            console.log('[litSigningService] Calling pkpSign with obtained SessionSigs...');
+            const pkpSignResult = await litNodeClient.pkpSign({
+                sessionSigs: sessionSigs,
+                toSign: digestToSign,
+                pubKey: pkpPublicKey,
+            });
+
+            console.log("[litSigningService] PKP Sign Result:", pkpSignResult);
+            if (!pkpSignResult || !pkpSignResult.signature) {
+                return { error: "Failed to sign message with PKP or signature missing from result." };
+            }
+            return { signature: pkpSignResult.signature as Hex };
+        } catch (signError: unknown) {
+            console.error('[litSigningService] Error during final pkpSign call:', signError);
+            const message = signError instanceof Error ? signError.message : 'An unknown error occurred during pkpSign.';
+            return { error: `Failed to sign: ${message}` };
+        }
+    } else {
+        return { error: "Failed to obtain session signatures through any method." };
     }
 }

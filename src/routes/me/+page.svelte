@@ -9,7 +9,7 @@
 		getOwnedCapacityCredits,
 		type PermittedAuthMethod,
 		type CapacityCredit
-	} from '$lib/wallet/services/LitService';
+	} from '$lib/wallet/services/litService';
 	import {
 		viemWalletClientStore,
 		connectedAccountStore,

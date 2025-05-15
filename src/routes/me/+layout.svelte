@@ -20,6 +20,7 @@
 
 	import { initializeLitClient } from '$lib/wallet/lit-connect';
 	import type { LitNodeClient } from '@lit-protocol/lit-node-client';
+	import { disconnectWeb3 } from '@lit-protocol/auth-browser'; // Import disconnectWeb3
 
 	// ADDED: For Navbar - from root layout
 	import { authClient } from '$lib/client/betterauth-client';
@@ -85,10 +86,50 @@
 		const client = $litClientStore;
 		if (client && client.ready) {
 			try {
-				await client.disconnect();
-				console.log('[ME Layout] Disconnected from Lit Network.');
+				console.log(
+					'[ME Layout] Attempting to disconnect from Lit Network and clear session keys...'
+				);
+				disconnectWeb3(); // Attempt to clear browser session keypair from localStorage via SDK
+				console.log('[ME Layout] disconnectWeb3() called.');
+				await client.disconnect(); // Disconnect from the Lit network nodes
+				console.log('[ME Layout] LitNodeClient disconnected from network nodes.');
 			} catch (error) {
-				console.error('[ME Layout] Error disconnecting from Lit Network:', error);
+				console.error('[ME Layout] Error during Lit Protocol SDK disconnection/cleanup:', error);
+			} finally {
+				// Manual cleanup as a fallback or to ensure thoroughness
+				if (browser) {
+					// Ensure localStorage is only accessed in the browser
+					try {
+						console.log('[ME Layout] Manually removing Lit Protocol keys from localStorage...');
+						localStorage.removeItem('lit-session-key');
+						localStorage.removeItem('lit-wallet-sig');
+						console.log('[ME Layout] Manually removed lit-session-key and lit-wallet-sig.');
+					} catch (e) {
+						console.error('[ME Layout] Error manually removing Lit keys from localStorage:', e);
+					}
+				}
+			}
+		}
+
+		// Also ensure manual cleanup happens if client wasn't ready or didn't exist, but we are destroying
+		if (browser) {
+			// Check if keys exist before trying to remove, to avoid unnecessary logs if already cleared
+			if (localStorage.getItem('lit-session-key') || localStorage.getItem('lit-wallet-sig')) {
+				console.log(
+					'[ME Layout] Ensuring Lit Protocol keys are removed from localStorage (outside client.ready check).'
+				);
+				try {
+					localStorage.removeItem('lit-session-key');
+					localStorage.removeItem('lit-wallet-sig');
+					console.log(
+						'[ME Layout] Successfully ensured removal of lit-session-key and lit-wallet-sig.'
+					);
+				} catch (e) {
+					console.error(
+						'[ME Layout] Error during final manual removal of Lit keys from localStorage:',
+						e
+					);
+				}
 			}
 		}
 		litClientStore.set(null);
