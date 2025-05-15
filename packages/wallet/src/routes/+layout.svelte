@@ -67,7 +67,7 @@
 	/>
 </svelte:head>
 
-<div class="bg-background-app font-ibm-plex-sans text-prussian-blue h-screen w-screen">
+<div class="bg-background-app font-ibm-plex-sans text-prussian-blue h-full w-full">
 	<main class="h-full w-full">
 		{@render children()}
 		{#if !$session.data?.user}

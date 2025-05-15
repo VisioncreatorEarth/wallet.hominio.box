@@ -1,37 +1,17 @@
 <script lang="ts">
 	let { children } = $props();
-
-	import {
-		createPublicClient,
-		// createWalletClient, // Not needed directly in this layout anymore for EOA connection
-		http,
-		// custom, // Not needed directly in this layout anymore for EOA connection
-		type PublicClient,
-		type Hex,
-		type Address
-		// type WalletClient // Not needed directly in this layout anymore for EOA connection
-	} from 'viem';
+	import { createPublicClient, http, type PublicClient, type Hex, type Address } from 'viem';
 	import { gnosis } from 'viem/chains';
 	import { onDestroy, onMount, setContext } from 'svelte';
 	import { writable, type Writable } from 'svelte/store';
-	import {
-		chainNameStore,
-		viemPublicClientStore
-		// viemWalletClientStore, // Managed by +page.svelte
-		// connectedAccountStore,  // Managed by +page.svelte
-		// walletConnectionErrorStore // Managed by +page.svelte
-	} from '$lib/stores/walletStore';
+	import { chainNameStore, viemPublicClientStore } from '$lib/stores/walletStore';
 
 	import { initializeLitClient } from '$lib/wallet/lit-connect';
 	import type { LitNodeClient } from '@lit-protocol/lit-node-client';
 	import { disconnectWeb3 } from '@lit-protocol/auth-browser'; // Import disconnectWeb3
-
-	// ADDED: For Navbar - from root layout
 	import { authClient } from '$lib/client/betterauth-client';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
-
-	// UPDATED: Imports for generalized Action Modal
 	import Signer from '$lib/components/Signer.svelte'; // Renamed from SignMessage.svelte
 	import {
 		signMessageWithPkp,
@@ -43,9 +23,7 @@
 		ExecuteEventDetail,
 		SimplifiedSignMessageUiParams,
 		SimplifiedExecuteLitActionUiParams,
-		ActionResultDetail,
-		SignMessageResultDetail,
-		ExecuteLitActionResultDetail
+		ActionResultDetail
 	} from '$lib/wallet/actionTypes';
 	import { example42LitActionCode } from '$lib/wallet/lit-actions/example-42';
 	import type { ExecuteJsResponse } from '@lit-protocol/types';
@@ -62,28 +40,22 @@
 	});
 	setContext(mobileMenuContextKey, mobileMenuStore);
 
-	// ADDED: For Navbar - session and signout logic from root layout
 	const session = authClient.useSession();
 	let signOutLoading = $state(false);
 
-	// UPDATED: State for generalized Action Modal
 	let isActionModalOpen = $state(false);
 	let isProcessingAction = $state(false);
 	let currentActionRequest = $state<RequestActionDetail | null>(null);
-	// Combined result state: can hold signature (Hex) or ExecuteJsResponse
 	let actionPrimaryResult = $state<Hex | ExecuteJsResponse | null>(null);
 	let actionErrorDetail = $state<string | null>(null);
 
-	// REPLACED $derived with writable store
 	const currentProcessResultStore: Writable<ActionResultDetail | null> = writable(null);
 
-	// ADDED: Derived data for PKP Passkey and wallet status
 	let currentPkpData = $derived(
 		$session.data?.user?.pkp_passkey && typeof $session.data.user.pkp_passkey === 'object'
 			? ($session.data.user.pkp_passkey as ClientPkpPasskey)
 			: null
 	);
-	let hasHominioWallet = $derived(!!currentPkpData?.pkpEthAddress);
 
 	async function handleSignOut() {
 		if (!browser) return;
@@ -99,7 +71,6 @@
 		}
 	}
 
-	// UPDATED: Handler for ActionComponent execute event
 	async function handleActionExecuteRequest(eventDetail: ExecuteEventDetail) {
 		if (!currentPkpData) {
 			console.error('PKP data not available to execute action.');
@@ -301,7 +272,6 @@
 		isActionModalOpen = true;
 	}
 
-	// MOVED HERE: Expose functions to control the action modal (must be at top level)
 	setContext('openSignMessageModal', openSignMessageModal);
 	setContext('openExecute42ActionModal', openExecute42ActionModal);
 

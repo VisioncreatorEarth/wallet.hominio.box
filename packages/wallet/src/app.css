@@ -11,27 +11,37 @@
   --color-moss-green: #8A9A5B;
 
   --color-background-app: #e3dfd9;
-  --color-background-surface: #eceae3;
+  --color-background-surface: #ecece9;
   --color-background-header: #dad6cf;
 
   --font-playfair-display: "Playfair Display", serif;
   --font-ibm-plex-sans: "IBM Plex Sans", sans-serif;
 }
 
-/* You might want to ensure a smooth scroll behavior globally if not handled by individual sections */
+html,
+body {
+  height: 100vh;
+  width: 100%;
+  position: fixed;
+  overflow: hidden;
+  margin: 0; /* Good practice to reset default margins */
+  padding: 0; /* Good practice to reset default paddings */
+}
+
+/* You might want to ensure a smooth scroll behavior globally if not handled by Tailwind */
 :global(html) {
   scroll-behavior: smooth;
 }
 
 /* Any other truly global base styles can go here */
 :global(body) {
-  /* font-family, background-color, and color will be set via utility classes on a layout wrapper or svelte:body */
-  /* Adjust line-height, etc., as needed globally if not overridden by Tailwind's defaults or specific utilities */
+  /* font-family, background-color, and color will be set via utility classes or specific component styles */
+  /* Adjust line-height, etc., as needed globally if not overridden by Tailwind's defaults or utilities */
   line-height: 1.6; /* A common base line-height */
 }
 
-/* Remove default margins from common elements if not handled by Tailwind's preflight or resets you prefer */
-:global(h1, h2, h3, h4, h5, h6, p, figure, blockquote, dl, dd) {
-  margin: 0;
+/* Remove default margins from common elements if not handled by Tailwind's defaults (example) */
+:global(h1, h2, h3, h4, h5, h6, p, ul, ol, figure) {
+  /* margin: 0; */ /* Be cautious with overly broad resets if using a framework like Tailwind that handles this */
 }
 

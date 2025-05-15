@@ -294,9 +294,7 @@
 				</h1>
 			</header>
 
-			<div
-				class="relative flex flex-grow flex-col gap-8 p-4 md:min-h-0 md:flex-row md:gap-10 md:p-0"
-			>
+			<div class="relative flex min-h-0 flex-grow flex-col gap-8 p-4 md:flex-row md:gap-10 md:p-0">
 				{#if $mobileMenuStore.isOpen}
 					<div
 						class="fixed inset-0 z-20 bg-black/30 md:hidden"
@@ -346,7 +344,7 @@
 				</aside>
 
 				<main
-					class="h-full w-full flex-1 space-y-6 overflow-y-auto md:mt-0 md:w-3/4"
+					class="min-h-0 w-full flex-1 space-y-6 overflow-y-auto md:mt-0 md:w-3/4"
 					style="-webkit-overflow-scrolling: touch;"
 				>
 					{#if activeTab === 'userDetails' && userDetails}
