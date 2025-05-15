@@ -31,10 +31,25 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 
-	// ADDED: Imports for Sign Message Modal
-	import SignMessage from '$lib/components/SignMessage.svelte';
-	import { signMessageWithPkp } from '$lib/wallet/services/litSigningService';
+	// UPDATED: Imports for generalized Action Modal
+	import Signer from '$lib/components/Signer.svelte'; // Renamed from SignMessage.svelte
+	import {
+		signMessageWithPkp,
+		executeLitActionWithPkp
+	} from '$lib/wallet/services/litSigningService';
 	import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
+	import type {
+		RequestActionDetail,
+		ExecuteEventDetail,
+		SimplifiedSignMessageUiParams,
+		SimplifiedExecuteLitActionUiParams,
+		ActionResultDetail,
+		SignMessageResultDetail,
+		ExecuteLitActionResultDetail
+	} from '$lib/wallet/actionTypes';
+	import { example42LitActionCode } from '$lib/wallet/lit-actions/example-42';
+	import type { ExecuteJsResponse } from '@lit-protocol/types';
+	import Modal from '$lib/components/Modal.svelte'; // ADDED: Import new Modal component
 
 	let publicClientInstance: PublicClient;
 	const litClientStore: Writable<LitNodeClient | null> = writable(null);
@@ -51,11 +66,16 @@
 	const session = authClient.useSession();
 	let signOutLoading = $state(false);
 
-	// ADDED: State for Sign Message Modal
-	let isSignMessageModalOpen = $state(false);
-	let isSigningMessage = $state(false);
-	let messageSignature = $state<Hex | null>(null);
-	let messageSigningError = $state<string | null>(null);
+	// UPDATED: State for generalized Action Modal
+	let isActionModalOpen = $state(false);
+	let isProcessingAction = $state(false);
+	let currentActionRequest = $state<RequestActionDetail | null>(null);
+	// Combined result state: can hold signature (Hex) or ExecuteJsResponse
+	let actionPrimaryResult = $state<Hex | ExecuteJsResponse | null>(null);
+	let actionErrorDetail = $state<string | null>(null);
+
+	// REPLACED $derived with writable store
+	const currentProcessResultStore: Writable<ActionResultDetail | null> = writable(null);
 
 	// ADDED: Derived data for PKP Passkey and wallet status
 	let currentPkpData = $derived(
@@ -79,45 +99,211 @@
 		}
 	}
 
-	// ADDED: Handlers for SignMessage component events
-	async function handleSignRequest(event: CustomEvent<string>) {
-		const messageToSign = event.detail;
-		isSigningMessage = true;
-		messageSignature = null;
-		messageSigningError = null;
+	// UPDATED: Handler for ActionComponent execute event
+	async function handleActionExecuteRequest(eventDetail: ExecuteEventDetail) {
+		if (!currentPkpData) {
+			console.error('PKP data not available to execute action.');
+			actionErrorDetail = 'PKP data not available.';
+			isActionModalOpen = false;
+			return;
+		}
+		isProcessingAction = true;
+		actionPrimaryResult = null;
+		actionErrorDetail = null;
 
-		if (
-			!currentPkpData?.pkpTokenId ||
-			!currentPkpData?.pubKey ||
-			!currentPkpData.rawId ||
-			!currentPkpData.passkeyVerifierContract
-		) {
-			messageSigningError =
-				'PKP details (Token ID, Public Key) or Passkey information not found in session. Cannot sign.';
-			isSigningMessage = false;
+		const {
+			pubKey: pkpPublicKey,
+			rawId: passkeyRawIdFromPkp,
+			passkeyVerifierContract: passkeyVerifierContractAddress,
+			pkpTokenId
+		} = currentPkpData;
+
+		if (!pkpPublicKey || !passkeyRawIdFromPkp || !passkeyVerifierContractAddress || !pkpTokenId) {
+			console.error('Essential PKP details missing from currentPkpData:', currentPkpData);
+			actionErrorDetail = 'Essential PKP details are missing from session.';
+			isProcessingAction = false;
 			return;
 		}
 
-		const result = await signMessageWithPkp(
-			messageToSign,
-			currentPkpData.pkpTokenId,
-			currentPkpData.pubKey as Hex,
-			currentPkpData.rawId as Hex,
-			currentPkpData.passkeyVerifierContract as Address
-		);
+		// Ensure passkeyRawId is in the correct Hex format and explicitly typed
+		const pkpRawIdInternal: string = passkeyRawIdFromPkp;
+		const formattedPasskeyRawId: Hex = pkpRawIdInternal.startsWith('0x')
+			? (pkpRawIdInternal as Hex)
+			: (`0x${pkpRawIdInternal}` as Hex);
 
-		if ('signature' in result) {
-			messageSignature = result.signature;
-		} else {
-			messageSigningError = result.error;
+		try {
+			if (eventDetail.type === 'signMessage') {
+				const uiParams = eventDetail.uiParams as SimplifiedSignMessageUiParams;
+				const result = await signMessageWithPkp(
+					uiParams.messageToSign,
+					pkpTokenId,
+					pkpPublicKey as Hex,
+					formattedPasskeyRawId,
+					passkeyVerifierContractAddress as Address
+				);
+				if (result && 'signature' in result && result.signature) {
+					actionPrimaryResult = result.signature;
+					actionErrorDetail = null;
+					console.log(
+						'[Layout] signMessage success, actionPrimaryResult:',
+						actionPrimaryResult,
+						'currentActionRequest:',
+						$state.snapshot(currentActionRequest)
+					);
+				} else if (result && 'error' in result && result.error) {
+					actionErrorDetail = result.error;
+					actionPrimaryResult = null;
+					console.log(
+						'[Layout] signMessage error, actionErrorDetail:',
+						actionErrorDetail,
+						'currentActionRequest:',
+						$state.snapshot(currentActionRequest)
+					);
+				} else {
+					actionErrorDetail = 'Unexpected result from signMessageWithPkp';
+					console.log(
+						'[Layout] signMessage unexpected result',
+						'currentActionRequest:',
+						$state.snapshot(currentActionRequest)
+					);
+				}
+			} else if (eventDetail.type === 'executeLitAction') {
+				const uiParams = eventDetail.uiParams as SimplifiedExecuteLitActionUiParams;
+				const result = await executeLitActionWithPkp(
+					pkpTokenId,
+					pkpPublicKey as Hex,
+					formattedPasskeyRawId,
+					passkeyVerifierContractAddress as Address,
+					uiParams.litActionCode,
+					uiParams.jsParams
+				);
+				if (result && 'error' in result && typeof result.error === 'string') {
+					actionErrorDetail = result.error;
+					actionPrimaryResult = null;
+					console.log(
+						'[Layout] executeLitAction error, actionErrorDetail:',
+						actionErrorDetail,
+						'currentActionRequest:',
+						$state.snapshot(currentActionRequest)
+					);
+				} else if (result && ('response' in result || 'logs' in result)) {
+					actionPrimaryResult = result as ExecuteJsResponse;
+					actionErrorDetail = null;
+					console.log(
+						'[Layout] executeLitAction success, actionPrimaryResult:',
+						actionPrimaryResult,
+						'currentActionRequest:',
+						$state.snapshot(currentActionRequest)
+					);
+				} else {
+					actionErrorDetail = 'Unexpected result structure from executeLitActionWithPkp';
+					actionPrimaryResult = null;
+					console.log(
+						'[Layout] executeLitAction unexpected result or error structure',
+						'result:',
+						result,
+						'currentActionRequest:',
+						$state.snapshot(currentActionRequest)
+					);
+				}
+			}
+		} catch (e: any) {
+			console.error('Error processing action:', e);
+			actionErrorDetail = e.message || 'An unexpected error occurred.';
+		} finally {
+			isProcessingAction = false;
+
+			// Manually compute and set the result store here
+			let resultToStore: ActionResultDetail | null = null;
+			const currentActionReqSnapshot = $state.snapshot(currentActionRequest);
+
+			if (actionErrorDetail) {
+				if (currentActionReqSnapshot?.type === 'signMessage') {
+					resultToStore = { type: 'signMessage', error: actionErrorDetail };
+				} else if (currentActionReqSnapshot?.type === 'executeLitAction') {
+					resultToStore = { type: 'executeLitAction', error: actionErrorDetail };
+				}
+				console.log(
+					'[Layout finally] Computed result for store (error case):',
+					$state.snapshot(resultToStore)
+				);
+			} else if (actionPrimaryResult) {
+				if (
+					currentActionReqSnapshot?.type === 'signMessage' &&
+					typeof actionPrimaryResult === 'string'
+				) {
+					resultToStore = { type: 'signMessage', signature: actionPrimaryResult };
+				} else if (
+					currentActionReqSnapshot?.type === 'executeLitAction' &&
+					typeof actionPrimaryResult === 'object' &&
+					actionPrimaryResult !== null
+				) {
+					resultToStore = {
+						type: 'executeLitAction',
+						result: actionPrimaryResult as ExecuteJsResponse
+					};
+				}
+				console.log(
+					'[Layout finally] Computed result for store (success case):',
+					$state.snapshot(resultToStore)
+				);
+			} else {
+				console.log('[Layout finally] Computed result for store (no error/result case): null');
+			}
+			currentProcessResultStore.set(resultToStore);
+			console.log(
+				'[Layout finally] currentProcessResultStore set to:',
+				$state.snapshot(resultToStore)
+			);
 		}
-		isSigningMessage = false;
 	}
 
-	function handleClearSignature() {
-		messageSignature = null;
-		messageSigningError = null;
+	function handleClearActionResult() {
+		actionPrimaryResult = null;
+		actionErrorDetail = null;
+		currentActionRequest = null;
+		currentProcessResultStore.set(null); // Also clear the store
+		console.log('[Layout] handleClearActionResult: currentProcessResultStore set to null');
 	}
+
+	function openSignMessageModal() {
+		if (!currentPkpData) return;
+		currentActionRequest = {
+			type: 'signMessage',
+			params: {
+				messageToSign: 'Hello from Hominio Wallet! Sign this.',
+				pkpPublicKey: currentPkpData.pubKey as Hex,
+				passkeyRawId: currentPkpData.rawId as Hex,
+				passkeyVerifierContractAddress: currentPkpData.passkeyVerifierContract as Address,
+				pkpTokenId: currentPkpData.pkpTokenId
+			}
+		};
+		actionPrimaryResult = null;
+		actionErrorDetail = null;
+		isActionModalOpen = true;
+	}
+
+	function openExecute42ActionModal() {
+		if (!currentPkpData) return;
+		currentActionRequest = {
+			type: 'executeLitAction',
+			params: {
+				litActionCode: example42LitActionCode,
+				jsParams: { magicNumber: Math.floor(Math.random() * 100) },
+				pkpPublicKey: currentPkpData.pubKey as Hex,
+				passkeyRawId: currentPkpData.rawId as Hex,
+				passkeyVerifierContractAddress: currentPkpData.passkeyVerifierContract as Address,
+				pkpTokenId: currentPkpData.pkpTokenId
+			}
+		};
+		actionPrimaryResult = null;
+		actionErrorDetail = null;
+		isActionModalOpen = true;
+	}
+
+	// MOVED HERE: Expose functions to control the action modal (must be at top level)
+	setContext('openSignMessageModal', openSignMessageModal);
+	setContext('openExecute42ActionModal', openExecute42ActionModal);
 
 	onMount(async () => {
 		publicClientInstance = createPublicClient({
@@ -126,9 +312,6 @@
 		});
 		$viemPublicClientStore = publicClientInstance;
 		$chainNameStore = gnosis.name;
-
-		// Set the store in context synchronously
-		setContext('litClientStore', litClientStore);
 
 		// Initialize Lit Client Asynchronously and update the store
 		try {
@@ -234,7 +417,7 @@
 					</button>
 					<a
 						href="/"
-						class="font-playfair-display text-prussian-blue hover:text-persian-orange flex items-center text-xl font-bold md:text-2xl"
+						class=" text-prussian-blue hover:text-persian-orange flex items-center text-xl font-bold md:text-3xl"
 					>
 						<img src="/logo.svg" alt="Hominio Logo" class="mr-2 h-8 w-8" />
 						Wallet
@@ -242,7 +425,6 @@
 				</div>
 
 				<div class="flex items-center space-x-2 sm:space-x-3">
-					<!-- Lit Connection Status UI Removed -->
 					<span class="text-prussian-blue/90 hidden text-sm sm:inline-block">
 						{$session.data.user.email || $session.data.user.name || 'User'}
 					</span>
@@ -305,68 +487,26 @@
 	<div class="bg-background-app relative flex-grow overflow-hidden">
 		{@render children()}
 
-		<!-- ADDED: Modal Trigger Button -->
-		{#if $session.data?.user && hasHominioWallet}
-			<button
-				onclick={() => {
-					isSignMessageModalOpen = true;
-					// Clear previous results when opening modal
-					messageSignature = null;
-					messageSigningError = null;
+		<!-- UPDATED: Generalized Action Modal -->
+		{#if isActionModalOpen && currentPkpData && currentActionRequest}
+			<Modal
+				isOpen={isActionModalOpen}
+				onClose={() => {
+					isActionModalOpen = false;
+					handleClearActionResult();
 				}}
-				class="focus:ring-persian-orange bg-persian-orange fixed bottom-6 left-1/2 z-50 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full p-3 text-white shadow-lg transition-transform hover:scale-105 focus:ring-2 focus:outline-none"
-				title="Sign Message"
+				title={currentActionRequest.type === 'signMessage'
+					? 'Sign a Message'
+					: 'Execute Lit Action'}
 			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-6 w-6"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-					stroke-width="2"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-					/>
-				</svg>
-			</button>
-		{/if}
-
-		<!-- ADDED: Sign Message Modal -->
-		{#if isSignMessageModalOpen && currentPkpData}
-			<div
-				class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-				onclick={(event) => {
-					if (event.target === event.currentTarget) {
-						isSignMessageModalOpen = false;
-					}
-				}}
-			>
-				<div class="bg-background-surface w-full max-w-lg rounded-xl p-6 shadow-2xl">
-					<div class="mb-4 flex items-center justify-between">
-						<h3 class="text-prussian-blue text-xl font-semibold">Sign a Message</h3>
-						<button
-							onclick={() => (isSignMessageModalOpen = false)}
-							class="text-prussian-blue/70 hover:text-prussian-blue rounded-full p-1 text-2xl leading-none focus:outline-none"
-							aria-label="Close modal"
-						>
-							&times;
-						</button>
-					</div>
-					<SignMessage
-						pkpPublicKey={currentPkpData.pubKey as Hex}
-						passkeyRawId={currentPkpData.rawId as Hex}
-						passkeyVerifierContractAddress={currentPkpData.passkeyVerifierContract as Address}
-						isSigningProcessActive={isSigningMessage}
-						signatureResult={messageSignature}
-						signingErrorDetail={messageSigningError}
-						on:sign={handleSignRequest}
-						on:clear={handleClearSignature}
-					/>
-				</div>
-			</div>
+				<Signer
+					actionRequest={currentActionRequest}
+					isProcessing={isProcessingAction}
+					processResult={$currentProcessResultStore}
+					onClose={handleClearActionResult}
+					onExecute={handleActionExecuteRequest}
+				/>
+			</Modal>
 		{/if}
 	</div>
 	{#if !$session.data?.user}

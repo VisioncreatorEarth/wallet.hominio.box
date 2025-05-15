@@ -26,6 +26,10 @@
 	// import SignMessage from '$lib/components/SignMessage.svelte';
 	// import { signMessageWithPkp } from '$lib/wallet/services/litSigningService';
 
+	// Get modal control functions from context
+	const openSignMessageModalFromLayout = getContext<() => void>('openSignMessageModal');
+	const openExecute42ActionModalFromLayout = getContext<() => void>('openExecute42ActionModal');
+
 	interface MobileMenuStore {
 		isOpen: boolean;
 		activeLabel: string;
@@ -44,7 +48,7 @@
 		{ id: 'walletManagement', label: 'Hominio Wallet' },
 		{ id: 'authMethods', label: 'Authorized Methods' },
 		{ id: 'capacityCredits', label: 'Capacity Credits' },
-		// REMOVED: { id: 'signMessage', label: 'Sign Message' },
+		{ id: 'testSigner', label: 'Test Signer' },
 		{ id: 'rawDebug', label: 'Raw Debug Data' }
 	];
 
@@ -310,7 +314,7 @@
 						{#each tabs as tab}
 							{#if tab.id === 'passkeyDetails' && !pkpPasskeyData}
 								<!-- Do not render -->
-							{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits') /* REMOVED: || tab.id === 'signMessage' */ && !hasHominioWallet}
+							{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits' || tab.id === 'testSigner') && !hasHominioWallet}
 								<!-- Do not render these if no Hominio Wallet -->
 							{:else if tab.id === 'walletManagement' && newPkpEthAddress && !hasHominioWallet}
 								<button
@@ -693,6 +697,32 @@
 									</p>
 								{/if}
 							</div>
+						</div>
+					{/if}
+
+					{#if activeTab === 'testSigner'}
+						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+							<h4 class="text-prussian-blue mb-4 text-lg font-semibold">Test Signer Actions</h4>
+							{#if hasHominioWallet}
+								<div class="space-y-3">
+									<button
+										onclick={() => openSignMessageModalFromLayout?.()}
+										class="focus:ring-persian-orange mt-2 w-full rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+									>
+										Sign Test Message
+									</button>
+									<button
+										onclick={() => openExecute42ActionModalFromLayout?.()}
+										class="focus:ring-persian-orange mt-2 w-full rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+									>
+										Execute Test Lit Action (42)
+									</button>
+								</div>
+							{:else}
+								<p class="text-prussian-blue/70 text-sm">
+									Please set up your Hominio Wallet to use the Test Signer.
+								</p>
+							{/if}
 						</div>
 					{/if}
 
