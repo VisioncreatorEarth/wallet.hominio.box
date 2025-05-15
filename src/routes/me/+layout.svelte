@@ -29,6 +29,14 @@
 	let publicClientInstance: PublicClient;
 	const litClientStore: Writable<LitNodeClient | null> = writable(null);
 
+	// Store for mobile menu state (isOpen, activeLabel)
+	const mobileMenuContextKey = 'mobileMenu';
+	const mobileMenuStore = writable({
+		isOpen: false,
+		activeLabel: 'User Details' // Default label, page will update it
+	});
+	setContext(mobileMenuContextKey, mobileMenuStore);
+
 	// ADDED: For Navbar - session and signout logic from root layout
 	const session = authClient.useSession();
 	let signOutLoading = $state(false);
@@ -87,38 +95,57 @@
 	});
 </script>
 
-<div class="h-full p-4 pt-2">
+<div class="flex h-full flex-col">
 	{#if $session.data?.user}
-		<header class="bg-linen mb-4 w-full p-4 shadow-md">
-			<nav class="container mx-auto flex items-center justify-between">
-				<a
-					href="/"
-					class="font-playfair-display text-prussian-blue hover:text-persian-orange text-2xl font-bold"
-				>
-					Hominio Wallet
-				</a>
-				<div class="flex items-center space-x-4">
-					{#if $litClientStore && $litClientStore.ready}
-						<span class="rounded-md bg-blue-100 px-2 py-1 font-mono text-xs text-blue-700">
-							Lit Connected
-						</span>
-					{:else if $litClientStore && !$litClientStore.ready}
-						<span class="rounded-md bg-yellow-100 px-2 py-1 font-mono text-xs text-yellow-700">
-							Lit Connecting...
-						</span>
-					{:else}
-						<span class="rounded-md bg-gray-100 px-2 py-1 font-mono text-xs text-gray-700">
-							Lit Not Connected
-						</span>
-					{/if}
+		<header
+			class="bg-background-header z-40 mb-0 flex h-16 w-full flex-shrink-0 items-center shadow-md md:mb-4"
+		>
+			<nav class="container mx-auto flex h-full w-full items-center justify-between px-4">
+				<div class="flex items-center">
+					<!-- Hamburger Button for Mobile -->
+					<button
+						onclick={() => mobileMenuStore.update((s) => ({ ...s, isOpen: !s.isOpen }))}
+						class="text-prussian-blue hover:bg-timberwolf-1/50 focus:ring-persian-orange mr-2 rounded-md p-2 focus:ring-2 focus:outline-none md:hidden"
+						aria-label="Toggle navigation menu"
+					>
+						{#if $mobileMenuStore.isOpen}
+							<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M6 18L18 6M6 6l12 12"
+								/>
+							</svg>
+						{:else}
+							<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M4 6h16M4 12h16m-7 6h7"
+								/>
+							</svg>
+						{/if}
+					</button>
+					<a
+						href="/"
+						class="font-playfair-display text-prussian-blue hover:text-persian-orange flex items-center text-xl font-bold md:text-2xl"
+					>
+						<img src="/logo.svg" alt="Hominio Logo" class="mr-2 h-8 w-8" />
+						Wallet
+					</a>
+				</div>
 
-					<span class="text-prussian-blue/90 text-sm">
+				<div class="flex items-center space-x-2 sm:space-x-3">
+					<!-- Lit Connection Status UI Removed -->
+					<span class="text-prussian-blue/90 hidden text-sm sm:inline-block">
 						{$session.data.user.email || $session.data.user.name || 'User'}
 					</span>
 					{#if typeof window !== 'undefined' && window.location.pathname !== '/me'}
 						<a
 							href="/me"
-							class="text-prussian-blue hover:bg-timberwolf-1/50 hover:text-persian-orange rounded-md px-3 py-2 text-sm font-medium"
+							class="text-prussian-blue hover:bg-timberwolf-1/50 hover:text-persian-orange hidden rounded-md px-3 py-2 text-sm font-medium sm:inline-block"
 						>
 							Profile
 						</a>
@@ -126,7 +153,7 @@
 					<button
 						onclick={handleSignOut}
 						disabled={signOutLoading}
-						class="focus:ring-opacity-60 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white shadow-md transition-colors hover:bg-red-700 focus:ring-2 focus:ring-red-500 focus:outline-none disabled:opacity-50"
+						class="focus:ring-opacity-60 bg-persian-orange flex h-9 w-9 items-center justify-center rounded-full text-white shadow-md transition-colors hover:bg-red-700 focus:ring-2 focus:ring-red-500 focus:outline-none disabled:opacity-50"
 						title="Sign out"
 					>
 						{#if signOutLoading}
@@ -171,7 +198,7 @@
 			</nav>
 		</header>
 	{/if}
-	<div class="h-full">
+	<div class="bg-background-app flex-grow overflow-hidden">
 		<slot />
 	</div>
 </div>

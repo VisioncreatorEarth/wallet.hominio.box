@@ -19,6 +19,16 @@
 	import { gnosis } from 'viem/chains';
 	import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
 	import { browser } from '$app/environment';
+	import { getContext, onMount } from 'svelte';
+	import type { Writable } from 'svelte/store';
+
+	interface MobileMenuStore {
+		isOpen: boolean;
+		activeLabel: string;
+	}
+
+	const mobileMenuContextKey = 'mobileMenu';
+	const mobileMenuStore = getContext<Writable<MobileMenuStore>>(mobileMenuContextKey);
 
 	const session = authClient.useSession();
 	let activeTab = $state('userDetails');
@@ -84,7 +94,7 @@
 				);
 				try {
 					const [credits, methods] = await Promise.all([
-						getOwnedCapacityCredits(currentPkpData.pkpEthAddress),
+						getOwnedCapacityCredits(currentPkpData.pkpEthAddress as Address),
 						getPermittedAuthMethodsForPkp(currentPkpData.pkpTokenId)
 					]);
 					ownedCapacityCredits = credits;
@@ -243,10 +253,26 @@
 		if (timestamp === 0n || !timestamp) return 'Never / Not Set';
 		return new Date(Number(timestamp) * 1000).toLocaleString();
 	}
+
+	// Effect to update the activeLabel in the store when activeTab changes
+	$effect(() => {
+		const currentTab = tabs.find((t) => t.id === activeTab);
+		if (currentTab && mobileMenuStore) {
+			mobileMenuStore.update((s) => ({ ...s, activeLabel: currentTab.label }));
+		}
+	});
+
+	// Initialize activeLabel on mount
+	onMount(() => {
+		const initialTab = tabs.find((t) => t.id === activeTab);
+		if (initialTab && mobileMenuStore) {
+			mobileMenuStore.update((s) => ({ ...s, activeLabel: initialTab.label }));
+		}
+	});
 </script>
 
-<div class="bg-linen font-ibm-plex-sans text-prussian-blue h-full min-h-screen p-4 pt-8 md:p-8">
-	<div class="mx-auto max-w-6xl">
+<div class="bg-background-app font-ibm-plex-sans text-prussian-blue h-full p-4 pt-8 md:p-0 md:pt-8">
+	<div class="mx-auto flex h-full max-w-6xl flex-col">
 		{#if $session.data?.user}
 			{@const allData = $session.data as any}
 			{@const userDetails = allData.user}
@@ -256,16 +282,30 @@
 					? (userDetails.pkp_passkey as ClientPkpPasskey)
 					: null}
 
-			<header class="mb-10 text-center md:text-left">
-				<h1 class="font-playfair-display text-prussian-blue text-4xl font-normal md:text-5xl">
-					Account Settings
+			<header class="mb-6 text-center md:mb-8 md:text-left">
+				<h1 class="font-playfair-display text-prussian-blue text-3xl font-normal md:text-4xl">
+					{$mobileMenuStore.activeLabel}
 				</h1>
-				<p class="text-prussian-blue/80 mt-1 text-lg">Manage your profile and session details.</p>
 			</header>
 
-			<div class="flex flex-col gap-8 md:flex-row md:gap-10">
+			<div
+				class="relative flex flex-grow flex-col gap-8 p-4 md:min-h-0 md:flex-row md:gap-10 md:p-0"
+			>
+				<!-- Overlay for mobile when aside is open -->
+				{#if $mobileMenuStore.isOpen}
+					<div
+						class="fixed inset-0 z-20 bg-black/30 md:hidden"
+						onclick={() => mobileMenuStore.update((s) => ({ ...s, isOpen: false }))}
+						aria-hidden="true"
+					></div>
+				{/if}
+
 				<!-- Aside Navigation -->
-				<aside class="w-full md:w-1/4">
+				<aside
+					class="bg-background-app fixed top-16 bottom-0 left-0 z-30 w-72 transform p-4 shadow-xl transition-transform duration-300 ease-in-out {$mobileMenuStore.isOpen
+						? 'translate-x-0'
+						: '-translate-x-full'} overflow-y-auto md:static md:top-auto md:bottom-auto md:left-auto md:z-auto md:h-full md:w-1/4 md:translate-x-0 md:transform-none md:bg-transparent md:p-0 md:shadow-none"
+				>
 					<nav class="space-y-2">
 						{#each tabs as tab}
 							{#if tab.id === 'passkeyDetails' && !pkpPasskeyData}
@@ -275,19 +315,25 @@
 							{:else if tab.id === 'walletManagement' && newPkpEthAddress && !hasHominioWallet}
 								<!-- If wallet just created but session not yet updated, still show wallet tab -->
 								<button
-									onclick={() => (activeTab = tab.id)}
+									onclick={() => {
+										activeTab = tab.id;
+										mobileMenuStore.update((s) => ({ ...s, isOpen: false }));
+									}}
 									class="{activeTab === tab.id
 										? 'bg-buff text-prussian-blue'
-										: 'text-prussian-blue/80 hover:bg-timberwolf-1/50'} focus:ring-persian-orange focus:ring-opacity-50 w-full rounded-lg p-3 text-left text-sm font-medium transition-colors duration-150 focus:ring-2 focus:outline-none"
+										: 'text-prussian-blue/80 hover:bg-timberwolf-1/50'} focus:ring-persian-orange focus:ring-opacity-50 w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors duration-150 focus:ring-2 focus:outline-none"
 								>
 									{tab.label}
 								</button>
 							{:else}
 								<button
-									onclick={() => (activeTab = tab.id)}
+									onclick={() => {
+										activeTab = tab.id;
+										mobileMenuStore.update((s) => ({ ...s, isOpen: false }));
+									}}
 									class="{activeTab === tab.id
 										? 'bg-buff text-prussian-blue'
-										: 'text-prussian-blue/80 hover:bg-timberwolf-1/50'} focus:ring-persian-orange focus:ring-opacity-50 w-full rounded-lg p-3 text-left text-sm font-medium transition-colors duration-150 focus:ring-2 focus:outline-none"
+										: 'text-prussian-blue/80 hover:bg-timberwolf-1/50'} focus:ring-persian-orange focus:ring-opacity-50 w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors duration-150 focus:ring-2 focus:outline-none"
 								>
 									{tab.label}
 								</button>
@@ -297,71 +343,93 @@
 				</aside>
 
 				<!-- Main Content Area -->
-				<main class="w-full flex-1 space-y-6 md:w-3/4">
+				<main
+					class="h-full w-full flex-1 space-y-6 overflow-y-auto md:mt-0 md:w-3/4"
+					style="-webkit-overflow-scrolling: touch;"
+				>
 					<!-- User Details Section -->
 					{#if activeTab === 'userDetails' && userDetails}
-						<div class="rounded-xl bg-white p-6 shadow-lg">
-							<h3
-								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
-							>
-								User Details
-							</h3>
-							<div class="space-y-3">
-								{#if userDetails.email}
+						{@const profileImageUrl = userDetails.image || userDetails.picture}
+						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+							<div class="flex flex-col items-center pt-1">
+								<!-- Profile Image -->
+								{#if profileImageUrl}
+									<img
+										src={profileImageUrl}
+										alt="Profile"
+										class="mb-4 h-24 w-24 rounded-full object-cover shadow-md md:h-32 md:w-32"
+									/>
+								{:else}
 									<div
-										class="border-timberwolf-2/50 flex flex-col justify-between border-b py-2 last:border-b-0 sm:flex-row sm:items-center"
+										class="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-slate-200 text-3xl font-semibold text-slate-600 shadow-md md:h-32 md:w-32"
 									>
-										<span class="text-prussian-blue/80 font-medium">Email:</span>
-										<span class="text-prussian-blue">{userDetails.email}</span>
+										{userDetails.name
+											? userDetails.name.charAt(0).toUpperCase()
+											: userDetails.email
+												? userDetails.email.charAt(0).toUpperCase()
+												: '?'}
 									</div>
 								{/if}
-								{#if userDetails.id}
-									<div
-										class="border-timberwolf-2/50 flex flex-col justify-between border-b py-2 last:border-b-0 sm:flex-row sm:items-center"
-									>
-										<span class="text-prussian-blue/80 font-medium">User ID:</span>
-										<span class="text-prussian-blue">{userDetails.id}</span>
-									</div>
-								{/if}
+
+								<!-- Name -->
 								{#if userDetails.name && userDetails.name !== userDetails.email}
-									<div
-										class="border-timberwolf-2/50 flex flex-col justify-between border-b py-2 last:border-b-0 sm:flex-row sm:items-center"
-									>
-										<span class="text-prussian-blue/80 font-medium">Name:</span>
-										<span class="text-prussian-blue">{userDetails.name}</span>
-									</div>
+									<h4 class="text-prussian-blue mb-1 text-center text-xl font-semibold md:text-2xl">
+										{userDetails.name}
+									</h4>
 								{/if}
-								{#each Object.entries(userDetails) as [key, value]}
-									{@const fieldsToSkip = ['email', 'id', 'name', 'pkp_passkey']}
-									{#if !fieldsToSkip.includes(key)}
+
+								<!-- Email -->
+								{#if userDetails.email}
+									<p class="text-prussian-blue/80 mb-6 text-center text-sm">{userDetails.email}</p>
+								{/if}
+
+								<!-- Divider -->
+								<hr class="border-timberwolf-2/50 mb-6 w-full border-t" />
+
+								<!-- Other Details -->
+								<div class="w-full space-y-3">
+									{#if userDetails.id}
 										<div
-											class="border-timberwolf-2/50 flex flex-col justify-between border-b py-2 last:border-b-0 sm:flex-row sm:items-start"
+											class="border-timberwolf-2/50 flex flex-col justify-between border-b py-2 last:border-b-0 sm:flex-row sm:items-center"
 										>
-											<span class="text-prussian-blue/80 font-medium">{formatKey(key)}:</span>
-											{#if typeof value === 'object' && value !== null}
-												<pre
-													class="bg-timberwolf-1/40 text-prussian-blue/90 mt-1 w-full overflow-auto rounded-md p-2 text-xs sm:mt-0 sm:w-auto sm:max-w-md md:max-w-lg"><code
-														>{JSON.stringify(value, null, 2)}</code
-													></pre>
-											{:else}
-												<span class="text-prussian-blue text-sm">{String(value ?? 'N/A')}</span>
-											{/if}
+											<span class="text-prussian-blue/80 font-medium">User ID:</span>
+											<span class="text-prussian-blue">{userDetails.id}</span>
 										</div>
 									{/if}
-								{/each}
+									{#each Object.entries(userDetails) as [key, value]}
+										{@const fieldsToSkip = [
+											'email',
+											'id',
+											'name',
+											'pkp_passkey',
+											'image',
+											'picture'
+										]}
+										{#if !fieldsToSkip.includes(key)}
+											<div
+												class="border-timberwolf-2/50 flex flex-col justify-between border-b py-2 last:border-b-0 sm:flex-row sm:items-start"
+											>
+												<span class="text-prussian-blue/80 font-medium">{formatKey(key)}:</span>
+												{#if typeof value === 'object' && value !== null}
+													<pre
+														class="bg-timberwolf-1/40 text-prussian-blue/90 mt-1 w-full overflow-auto rounded-md p-2 text-xs sm:mt-0 sm:w-auto sm:max-w-md md:max-w-lg"><code
+															>{JSON.stringify(value, null, 2)}</code
+														></pre>
+												{:else}
+													<span class="text-prussian-blue text-sm">{String(value ?? 'N/A')}</span>
+												{/if}
+											</div>
+										{/if}
+									{/each}
+								</div>
 							</div>
 						</div>
 					{/if}
 
 					<!-- Session Information Section -->
 					{#if activeTab === 'sessionInfo' && sessionInfo}
-						<div class="rounded-xl bg-white p-6 shadow-lg">
-							<h3
-								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
-							>
-								Session Information
-							</h3>
-							<div class="space-y-3">
+						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+							<div class="space-y-3 pt-1">
 								{#each Object.entries(sessionInfo) as [key, value]}
 									<div
 										class="border-timberwolf-2/50 flex flex-col justify-between border-b py-2 last:border-b-0 sm:flex-row sm:items-start"
@@ -385,13 +453,8 @@
 
 					<!-- Passkey Details Section -->
 					{#if activeTab === 'passkeyDetails' && pkpPasskeyData}
-						<div class="rounded-xl bg-white p-6 shadow-lg">
-							<h3
-								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
-							>
-								Passkey & PKP Linkage
-							</h3>
-							<div class="space-y-3">
+						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+							<div class="space-y-3 pt-1">
 								{#each Object.entries(pkpPasskeyData) as [key, value]}
 									<div
 										class="border-timberwolf-2/50 flex flex-col justify-between border-b py-2 last:border-b-0 sm:flex-row sm:items-start"
@@ -415,33 +478,27 @@
 
 					<!-- Wallet Management Section -->
 					{#if activeTab === 'walletManagement'}
-						<div class="rounded-xl bg-white p-6 shadow-lg">
-							<h3
-								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
-							>
-								Hominio Wallet
-							</h3>
-							{#if hasHominioWallet}
-								<p class="text-prussian-blue">Your Hominio Wallet ETH Address:</p>
-								<p class="rounded bg-slate-100 p-2 font-mono text-sm break-all">
-									{$session.data?.user?.pkp_passkey &&
-									typeof $session.data.user.pkp_passkey === 'object'
-										? ($session.data.user.pkp_passkey as ClientPkpPasskey).pkpEthAddress
-										: 'Not available'}
-								</p>
-								{#if pkpPasskeyData?.pkpTokenId}
-									<div class="mt-3 text-xs text-slate-500">
-										<p>PKP Token ID: {pkpPasskeyData.pkpTokenId}</p>
-										{#if pkpPasskeyData?.pubKey}
-											<p class="mt-1">
-												PKP Public Key: <span class="break-all">{pkpPasskeyData.pubKey}</span>
-											</p>
-										{/if}
-									</div>
-								{/if}
-							{:else}
-								<!-- Step 0: EOA Connection (If not connected) -->
-								{#if !eoaAccountAddress}
+						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+							<div class="pt-1">
+								{#if hasHominioWallet}
+									<p class="text-prussian-blue">Your Hominio Wallet ETH Address:</p>
+									<p class="rounded bg-slate-100 p-2 font-mono text-sm break-all">
+										{$session.data?.user?.pkp_passkey &&
+										typeof $session.data.user.pkp_passkey === 'object'
+											? ($session.data.user.pkp_passkey as ClientPkpPasskey).pkpEthAddress
+											: 'Not available'}
+									</p>
+									{#if pkpPasskeyData?.pkpTokenId}
+										<div class="mt-3 text-xs text-slate-500">
+											<p>PKP Token ID: {pkpPasskeyData.pkpTokenId}</p>
+											{#if pkpPasskeyData?.pubKey}
+												<p class="mt-1">
+													PKP Public Key: <span class="break-all">{pkpPasskeyData.pubKey}</span>
+												</p>
+											{/if}
+										</div>
+									{/if}
+								{:else if !eoaAccountAddress}
 									<div class="mb-6 rounded-lg border border-orange-300 bg-orange-50 p-4">
 										<h4 class="mb-2 text-lg font-semibold text-orange-700">
 											Step 1: Connect Your EOA Wallet
@@ -461,13 +518,14 @@
 										{/if}
 									</div>
 								{:else}
-									<!-- EOA Connected, show wallet creation steps -->
 									<div
 										class="mb-4 flex items-center justify-between rounded-lg border border-green-300 bg-green-50 p-3"
 									>
 										<div>
 											<p class="text-sm font-medium text-green-700">EOA Wallet Connected:</p>
-											<p class="font-mono text-xs break-all text-green-600">{eoaAccountAddress}</p>
+											<p class="font-mono text-xs break-all text-green-600">
+												{eoaAccountAddress}
+											</p>
 										</div>
 										<button
 											onclick={disconnectMetaMask}
@@ -477,19 +535,19 @@
 											Disconnect
 										</button>
 									</div>
-
 									<p class="text-prussian-blue/90 mb-4">
 										You do not have a Hominio Wallet set up yet. Create one to manage your digital
 										assets and interactions within Hominio.
 									</p>
-
 									{#if isWalletCreating || walletFlowState}
 										<div class="border-buff my-4 space-y-2 rounded-lg border p-4">
 											<p class="text-prussian-blue text-sm font-semibold">
 												{walletFlowState?.step || 'Processing...'}
 											</p>
 											{#if walletFlowState?.message}
-												<p class="text-prussian-blue/80 text-xs">{walletFlowState.message}</p>
+												<p class="text-prussian-blue/80 text-xs">
+													{walletFlowState.message}
+												</p>
 											{/if}
 											{#if walletFlowState?.status === 'pending'}
 												<div
@@ -498,23 +556,22 @@
 											{/if}
 										</div>
 									{/if}
-
 									{#if walletCreationError}
 										<p class="my-3 text-sm text-red-600">Error: {walletCreationError}</p>
 									{/if}
-
 									{#if newPkpEthAddress}
 										<div class="my-3 rounded-lg border border-emerald-300 bg-emerald-50 p-4">
 											<p class="font-semibold text-emerald-700">Wallet Created Successfully!</p>
 											<p class="text-xs text-emerald-600">Your new Hominio Wallet Address:</p>
-											<p class="font-mono text-sm break-all text-emerald-800">{newPkpEthAddress}</p>
+											<p class="font-mono text-sm break-all text-emerald-800">
+												{newPkpEthAddress}
+											</p>
 											<p class="mt-2 text-xs text-slate-500">
 												It might take a moment for this page to fully reflect the new wallet status.
 												You can try refreshing.
 											</p>
 										</div>
 									{/if}
-
 									{#if !newPkpEthAddress}
 										<button
 											onclick={handleCreateWallet}
@@ -529,142 +586,135 @@
 										</button>
 									{/if}
 								{/if}
-							{/if}
+							</div>
 						</div>
 					{/if}
 
 					<!-- Authorized Methods Section - NEW -->
 					{#if activeTab === 'authMethods'}
-						<div class="rounded-xl bg-white p-6 shadow-lg">
-							<h3
-								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
-							>
-								Authorized Methods for PKP
-							</h3>
-							{#if !hasHominioWallet}
-								<p class="text-prussian-blue/70 text-sm">
-									Please set up your Hominio Wallet to view authorized methods.
-								</p>
-							{:else if isLoadingWalletDetails}
-								<div class="flex items-center justify-start p-4">
-									<div class="spinner text-prussian-blue/80 mr-3 h-5 w-5"></div>
-									<p class="text-prussian-blue/80 text-sm">Loading authorized methods...</p>
-								</div>
-							{:else if walletDetailsError}
-								<div class="rounded-md bg-red-50 p-3">
-									<p class="text-sm text-red-700">
-										<span class="font-medium">Error:</span>
-										{walletDetailsError}
+						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+							<div class="pt-1">
+								{#if !hasHominioWallet}
+									<p class="text-prussian-blue/70 text-sm">
+										Please set up your Hominio Wallet to view authorized methods.
 									</p>
-								</div>
-							{:else if permittedAuthMethods && permittedAuthMethods.length > 0}
-								<ul class="divide-timberwolf-2/30 divide-y">
-									{#each permittedAuthMethods as method (method.id + method.authMethodType.toString())}
-										<li class="py-3">
-											<p class="text-prussian-blue/90 text-sm font-medium">
-												Type:
-												<span class="text-prussian-blue font-semibold"
-													>{formatAuthMethodType(method.authMethodType)}</span
-												>
-											</p>
-											{#if method.authMethodType === 2n}
-												<!-- Lit Action -->
-												<p class="text-prussian-blue/70 mt-1 text-xs">
-													Action IPFS CID (Hex):
-													<span class="font-mono break-all">{formatIpfsCid(method.id)}</span>
+								{:else if isLoadingWalletDetails}
+									<div class="flex items-center justify-start p-4">
+										<div class="spinner text-prussian-blue/80 mr-3 h-5 w-5"></div>
+										<p class="text-prussian-blue/80 text-sm">Loading authorized methods...</p>
+									</div>
+								{:else if walletDetailsError}
+									<div class="rounded-md bg-red-50 p-3">
+										<p class="text-sm text-red-700">
+											<span class="font-medium">Error:</span>
+											{walletDetailsError}
+										</p>
+									</div>
+								{:else if permittedAuthMethods && permittedAuthMethods.length > 0}
+									<ul class="divide-timberwolf-2/30 divide-y">
+										{#each permittedAuthMethods as method (method.id + method.authMethodType.toString())}
+											<li class="py-3">
+												<p class="text-prussian-blue/90 text-sm font-medium">
+													Type:
+													<span class="text-prussian-blue font-semibold"
+														>{formatAuthMethodType(method.authMethodType)}</span
+													>
 												</p>
-											{:else if method.authMethodType === 1n || method.authMethodType === 4n || method.authMethodType === 6n}
-												<!-- Passkey or EOA based -->
-												<p class="text-prussian-blue/70 mt-1 text-xs">
-													Identifier / User PubKey on Contract (Hex):
-													<span class="font-mono break-all">{method.userPubkey || 'N/A'}</span>
-												</p>
-												{#if method.id !== method.userPubkey && method.id.length > 2}
+												{#if method.authMethodType === 2n}
+													<!-- Lit Action -->
+													<p class="text-prussian-blue/70 mt-1 text-xs">
+														Action IPFS CID (Hex):
+														<span class="font-mono break-all">{formatIpfsCid(method.id)}</span>
+													</p>
+												{:else if method.authMethodType === 1n || method.authMethodType === 4n || method.authMethodType === 6n}
+													<!-- Passkey or EOA based -->
+													<p class="text-prussian-blue/70 mt-1 text-xs">
+														Identifier / User PubKey on Contract (Hex):
+														<span class="font-mono break-all">{method.userPubkey || 'N/A'}</span>
+													</p>
+													{#if method.id !== method.userPubkey && method.id.length > 2}
+														<p class="text-prussian-blue/70 mt-1 text-xs">
+															Method ID (Hex):
+															<span class="font-mono break-all">{method.id}</span>
+														</p>
+													{/if}
+												{:else}
+													<!-- Other types -->
 													<p class="text-prussian-blue/70 mt-1 text-xs">
 														Method ID (Hex):
 														<span class="font-mono break-all">{method.id}</span>
 													</p>
+													{#if method.userPubkey && method.userPubkey.length > 2}
+														<p class="text-prussian-blue/70 mt-1 text-xs">
+															User PubKey on Contract (Hex):
+															<span class="font-mono break-all">{method.userPubkey}</span>
+														</p>
+													{/if}
 												{/if}
-											{:else}
-												<!-- Other types -->
-												<p class="text-prussian-blue/70 mt-1 text-xs">
-													Method ID (Hex):
-													<span class="font-mono break-all">{method.id}</span>
-												</p>
-												{#if method.userPubkey && method.userPubkey.length > 2}
-													<p class="text-prussian-blue/70 mt-1 text-xs">
-														User PubKey on Contract (Hex):
-														<span class="font-mono break-all">{method.userPubkey}</span>
-													</p>
-												{/if}
-											{/if}
-										</li>
-									{/each}
-								</ul>
-							{:else}
-								<p class="text-prussian-blue/70 text-sm">
-									No permitted authentication methods found for this PKP.
-								</p>
-							{/if}
+											</li>
+										{/each}
+									</ul>
+								{:else}
+									<p class="text-prussian-blue/70 text-sm">
+										No permitted authentication methods found for this PKP.
+									</p>
+								{/if}
+							</div>
 						</div>
 					{/if}
 
 					<!-- Capacity Credits Section - NEW -->
 					{#if activeTab === 'capacityCredits'}
-						<div class="rounded-xl bg-white p-6 shadow-lg">
-							<h3
-								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
-							>
-								Capacity Credits for PKP
-							</h3>
-							{#if !hasHominioWallet}
-								<p class="text-prussian-blue/70 text-sm">
-									Please set up your Hominio Wallet to view capacity credits.
-								</p>
-							{:else if isLoadingWalletDetails}
-								<div class="flex items-center justify-start p-4">
-									<div class="spinner text-prussian-blue/80 mr-3 h-5 w-5"></div>
-									<p class="text-prussian-blue/80 text-sm">Loading capacity credits...</p>
-								</div>
-							{:else if walletDetailsError}
-								<div class="rounded-md bg-red-50 p-3">
-									<p class="text-sm text-red-700">
-										<span class="font-medium">Error:</span>
-										{walletDetailsError}
+						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+							<div class="pt-1">
+								{#if !hasHominioWallet}
+									<p class="text-prussian-blue/70 text-sm">
+										Please set up your Hominio Wallet to view capacity credits.
 									</p>
-								</div>
-							{:else if ownedCapacityCredits && ownedCapacityCredits.length > 0}
-								<ul class="divide-timberwolf-2/30 divide-y">
-									{#each ownedCapacityCredits as credit (credit.tokenId)}
-										<li class="py-3">
-											<p class="text-prussian-blue/90 text-sm font-medium">
-												Token ID:
-												<span class="text-prussian-blue font-mono text-xs">{credit.tokenId}</span>
-											</p>
-											<p class="text-prussian-blue/70 mt-1 text-xs">
-												Requests/KiloSec: {credit.requestsPerKilosecond.toString()}
-											</p>
-											<p class="text-prussian-blue/70 mt-1 text-xs">
-												Expires: {formatTimestamp(credit.expiresAt)}
-											</p>
-										</li>
-									{/each}
-								</ul>
-							{:else}
-								<p class="text-prussian-blue/70 text-sm">No capacity credits found for this PKP.</p>
-							{/if}
+								{:else if isLoadingWalletDetails}
+									<div class="flex items-center justify-start p-4">
+										<div class="spinner text-prussian-blue/80 mr-3 h-5 w-5"></div>
+										<p class="text-prussian-blue/80 text-sm">Loading capacity credits...</p>
+									</div>
+								{:else if walletDetailsError}
+									<div class="rounded-md bg-red-50 p-3">
+										<p class="text-sm text-red-700">
+											<span class="font-medium">Error:</span>
+											{walletDetailsError}
+										</p>
+									</div>
+								{:else if ownedCapacityCredits && ownedCapacityCredits.length > 0}
+									<ul class="divide-timberwolf-2/30 divide-y">
+										{#each ownedCapacityCredits as credit (credit.tokenId)}
+											<li class="py-3">
+												<p class="text-prussian-blue/90 text-sm font-medium">
+													Token ID:
+													<span class="text-prussian-blue font-mono text-xs">{credit.tokenId}</span>
+												</p>
+												<p class="text-prussian-blue/70 mt-1 text-xs">
+													Requests/KiloSec: {credit.requestsPerKilosecond.toString()}
+												</p>
+												<p class="text-prussian-blue/70 mt-1 text-xs">
+													Expires: {formatTimestamp(credit.expiresAt)}
+												</p>
+											</li>
+										{/each}
+									</ul>
+								{:else}
+									<p class="text-prussian-blue/70 text-sm">
+										No capacity credits found for this PKP.
+									</p>
+								{/if}
+							</div>
 						</div>
 					{/if}
 
 					<!-- Raw Debug Data Section -->
 					{#if activeTab === 'rawDebug'}
-						<div class="rounded-xl bg-white p-6 shadow-lg">
-							<h3
-								class="border-timberwolf-2/70 text-prussian-blue mb-5 border-b pb-3 text-xl font-semibold"
+						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+							<div
+								class="bg-prussian-blue overflow-auto rounded-lg p-4 pt-1 text-left shadow-inner"
 							>
-								Full Raw Session Data (Debug)
-							</h3>
-							<div class="bg-prussian-blue overflow-auto rounded-lg p-4 text-left shadow-inner">
 								<pre class="text-linen text-xs">{JSON.stringify(allData, null, 2)}</pre>
 							</div>
 						</div>

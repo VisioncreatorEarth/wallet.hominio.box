@@ -67,7 +67,7 @@
 	/>
 </svelte:head>
 
-<div class="bg-linen font-ibm-plex-sans text-prussian-blue h-screen w-screen">
+<div class="bg-background-app font-ibm-plex-sans text-prussian-blue h-screen w-screen">
 	<main class="h-full w-full">
 		{@render children()}
 		{#if !$session.data?.user}
@@ -75,7 +75,7 @@
 				<button
 					onclick={handleGoogleSignIn}
 					disabled={loadingGoogleSignIn}
-					class="inline-flex items-center justify-center gap-2 rounded-full border border-transparent bg-[#1a365d] px-5 py-2 text-sm font-medium text-white shadow-md transition-all hover:bg-[#174C6B] hover:text-white disabled:opacity-50"
+					class="bg-prussian-blue inline-flex items-center justify-center gap-2 rounded-full border border-transparent px-5 py-2 text-sm font-medium text-white shadow-md transition-all hover:bg-[#174C6B] hover:text-white disabled:opacity-50"
 				>
 					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
 						<path
@@ -98,7 +98,7 @@
 					{loadingGoogleSignIn ? 'Processing...' : 'Continue with Google'}
 				</button>
 				{#if signInError}
-					<p class="mt-2 text-xs text-red-400">Error: {signInError}</p>
+					<p class="text-persian-orange mt-2 text-xs">Error: {signInError}</p>
 				{/if}
 			</div>
 		{/if}

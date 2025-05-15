@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-prussian-blue: #0C2D48;
+  --color-prussian-blue: #1a2d5b;
   --color-timberwolf-1: #D9CDC2;
   --color-timberwolf-2: #E6E1DB;
   --color-linen: #FFF6EC;
@@ -9,6 +9,10 @@
   --color-persian-orange: #D08968;
   --color-rosy-brown: #B88C84;
   --color-moss-green: #8A9A5B;
+
+  --color-background-app: #e7e1d7;
+  --color-background-surface: #eceae3;
+  --color-background-header: #d8d1c6;
 
   --font-playfair-display: "Playfair Display", serif;
   --font-ibm-plex-sans: "IBM Plex Sans", sans-serif;
