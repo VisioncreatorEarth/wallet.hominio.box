@@ -17,9 +17,9 @@ export interface ClientPkpPasskey {
     pkpTokenId: string; // Added pkpTokenId
 }
 
-// Args for updateUserPasskeyInfo
+// Args for updateUserPasskeyInfo - This defines the structure of the 'data' argument for the action
 export interface UpdatePasskeyInfoClientArgs {
-    pkp_passkey: ClientPkpPasskey; // pkp_passkey is mandatory for update
+    pkp_passkey: ClientPkpPasskey;
 }
 
 // Expected response from updateUserPasskeyInfo
@@ -74,6 +74,8 @@ export const pkpPasskeyClientPlugin = () => ({
     getActions: ($fetch: BetterFetch) => {
         return {
             updateUserPasskeyInfo: async (data: UpdatePasskeyInfoClientArgs): Promise<UpdatePasskeyInfoClientResponse> => {
+                // 'data' is UpdatePasskeyInfoClientArgs, which is { pkp_passkey: ClientPkpPasskey }.
+                // This is sent as the body, matching server expectation.
                 return $fetch('/pkp-passkey-plugin/update-user-passkey-info', {
                     method: 'POST',
                     body: data,
