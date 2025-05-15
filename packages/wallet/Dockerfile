@@ -27,17 +27,18 @@ ARG PUBLIC_BASE_URL
 ENV PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
 
 # Copy package-specific files and root lockfile/npmrc
-# This assumes the Docker build context is packages/wallet/
-COPY package.json ./
-COPY ../../bun.lockb ./bun.lockb
-COPY ../../.npmrc ./.npmrc
+# Assumes the Docker build context is the MONOREPO ROOT
+COPY packages/wallet/package.json ./package.json
+COPY bun.lockb ./bun.lockb
+COPY .npmrc ./.npmrc
 
 # Install dependencies based on root lockfile
 # Ensure svelte-kit sync runs (usually part of prepare script in package.json, triggered by install)
+# We need to set the CWD for bun install to the app directory where package.json now is
 RUN bun install --frozen-lockfile --production=false
 
-# Copy application code from packages/wallet context
-COPY . .
+# Copy application code from packages/wallet context into the /app directory
+COPY packages/wallet/. ./
 
 # Build application
 # The PUBLIC_BASE_URL ENV var will be available here

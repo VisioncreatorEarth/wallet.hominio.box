@@ -29,5 +29,4 @@ jobs:
       - name: Deploy to Fly.io
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        working-directory: ./packages/wallet
-        run: flyctl deploy --remote-only --build-arg PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}"
+        run: flyctl deploy --remote-only --config packages/wallet/fly.toml --build-arg PUBLIC_BASE_URL="${{ secrets.PUBLIC_BASE_URL }}"
