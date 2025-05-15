@@ -17,4 +17,6 @@ declare global {
 	}
 }
 
+declare module 'ipfs-only-hash'; // Added for ipfs-only-hash type declaration
+
 export { };

@@ -41,6 +41,7 @@
 	"dependencies": {
 		"@lit-protocol/lit-node-client": "^7.1.1",
 		"better-auth": "^1.2.7",
+		"ipfs-only-hash": "^4.0.0",
 		"pg": "^8.16.0",
 		"viem": "^2.29.2"
 	}

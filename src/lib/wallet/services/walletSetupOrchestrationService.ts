@@ -9,6 +9,7 @@ import type { Address, Hex, WalletClient } from 'viem';
 import { authClient } from '$lib/client/betterauth-client';
 import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
 
+
 export interface WalletSetupState {
     step: string;
     status: 'idle' | 'pending' | 'success' | 'error';
@@ -120,7 +121,7 @@ export async function createNewPasskeyWallet({
         };
 
         try {
-            const persistenceResult = await authClient.pkpPasskeyPlugin.updateUserPasskeyInfo({ pkp_passkey: pkpDataToPersist });
+            const persistenceResult = await authClient.pkpPasskeyPlugin.updateUserPasskeyInfo({ body: pkpDataToPersist });
             if (!persistenceResult || persistenceResult.error || !persistenceResult.data?.user?.pkp_passkey) {
                 const pluginErrorMsg = persistenceResult?.error?.message || 'Unknown error or missing user data from pkpPasskeyPlugin';
                 console.error('Failed to persist PKP passkey info to DB:', pluginErrorMsg, persistenceResult);

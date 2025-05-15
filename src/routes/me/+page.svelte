@@ -9,7 +9,7 @@
 		getOwnedCapacityCredits,
 		type PermittedAuthMethod,
 		type CapacityCredit
-	} from '$lib/wallet/services/litService';
+	} from '$lib/wallet/services/LitService';
 	import {
 		viemWalletClientStore,
 		connectedAccountStore,
@@ -21,6 +21,10 @@
 	import { browser } from '$app/environment';
 	import { getContext, onMount } from 'svelte';
 	import type { Writable } from 'svelte/store';
+
+	// NEW: Import SignMessage component and signing service
+	import SignMessage from '$lib/components/wallet/SignMessage.svelte';
+	import { signMessageWithPkp } from '$lib/wallet/services/litSigningService';
 
 	interface MobileMenuStore {
 		isOpen: boolean;
@@ -40,6 +44,7 @@
 		{ id: 'walletManagement', label: 'Hominio Wallet' },
 		{ id: 'authMethods', label: 'Authorized Methods' },
 		{ id: 'capacityCredits', label: 'Capacity Credits' },
+		{ id: 'signMessage', label: 'Sign Message' }, // NEW: Sign Message Tab
 		{ id: 'rawDebug', label: 'Raw Debug Data' }
 	];
 
@@ -60,11 +65,16 @@
 	// EOA Connection error store (shadows the imported store for local usage in template)
 	let eoaConnectionError = $state<string | null>(null);
 
-	// State for wallet details (capacity credits and auth methods) - NEW
+	// State for wallet details (capacity credits and auth methods)
 	let ownedCapacityCredits = $state<CapacityCredit[] | null>(null);
 	let permittedAuthMethods = $state<PermittedAuthMethod[] | null>(null);
 	let isLoadingWalletDetails = $state(false);
 	let walletDetailsError = $state<string | null>(null);
+
+	// NEW: State for message signing
+	let isSigningMessage = $state(false);
+	let messageSignature = $state<Hex | null>(null);
+	let messageSigningError = $state<string | null>(null);
 
 	$effect(() => {
 		eoaWalletClient = $viemWalletClientStore;
@@ -80,13 +90,11 @@
 
 	let hasHominioWallet = $derived(!!currentPkpData?.pkpEthAddress);
 
-	// Effect to fetch wallet details (auth methods, capacity credits) - NEW
 	$effect(() => {
 		async function fetchDetails() {
 			if (browser && currentPkpData?.pkpEthAddress && currentPkpData?.pkpTokenId) {
 				isLoadingWalletDetails = true;
 				walletDetailsError = null;
-				// Reset previous values
 				ownedCapacityCredits = null;
 				permittedAuthMethods = null;
 				console.log(
@@ -108,7 +116,6 @@
 					isLoadingWalletDetails = false;
 				}
 			} else {
-				// Clear details if no PKP info
 				ownedCapacityCredits = null;
 				permittedAuthMethods = null;
 			}
@@ -116,7 +123,6 @@
 		fetchDetails();
 	});
 
-	// ADDED: EOA Connection Logic (from +layout.svelte)
 	async function connectMetaMask() {
 		walletConnectionErrorStore.set(null);
 		eoaConnectionError = null;
@@ -203,7 +209,47 @@
 		}
 	}
 
-	// Helper functions (ported from legacy settings page) - NEW
+	// NEW: Handlers for SignMessage component events
+	async function handleSignRequest(event: CustomEvent<string>) {
+		const messageToSign = event.detail;
+		isSigningMessage = true;
+		messageSignature = null;
+		messageSigningError = null;
+
+		if (
+			!currentPkpData?.pkpTokenId ||
+			!currentPkpData?.pubKey ||
+			!currentPkpData.rawId ||
+			!currentPkpData.passkeyVerifierContract
+		) {
+			messageSigningError =
+				'PKP details (Token ID, Public Key) or Passkey information not found in session. Cannot sign.';
+			isSigningMessage = false;
+			return;
+		}
+
+		const result = await signMessageWithPkp(
+			messageToSign,
+			currentPkpData.pkpTokenId,
+			currentPkpData.pubKey as Hex,
+			currentPkpData.rawId as Hex,
+			currentPkpData.passkeyVerifierContract as Address
+		);
+
+		if ('signature' in result) {
+			messageSignature = result.signature;
+		} else {
+			messageSigningError = result.error;
+		}
+		isSigningMessage = false;
+	}
+
+	function handleClearSignature() {
+		messageSignature = null;
+		messageSigningError = null;
+		// The message in the component's textarea is managed by the component itself.
+	}
+
 	function formatAuthMethodType(type: bigint): string {
 		switch (type) {
 			case 0n: // Assuming 0 is commonly "EOA Wallet" if not explicitly defined elsewhere
@@ -254,7 +300,6 @@
 		return new Date(Number(timestamp) * 1000).toLocaleString();
 	}
 
-	// Effect to update the activeLabel in the store when activeTab changes
 	$effect(() => {
 		const currentTab = tabs.find((t) => t.id === activeTab);
 		if (currentTab && mobileMenuStore) {
@@ -262,7 +307,6 @@
 		}
 	});
 
-	// Initialize activeLabel on mount
 	onMount(() => {
 		const initialTab = tabs.find((t) => t.id === activeTab);
 		if (initialTab && mobileMenuStore) {
@@ -277,10 +321,7 @@
 			{@const allData = $session.data as any}
 			{@const userDetails = allData.user}
 			{@const sessionInfo = allData.session}
-			{@const pkpPasskeyData =
-				userDetails?.pkp_passkey && typeof userDetails.pkp_passkey === 'object'
-					? (userDetails.pkp_passkey as ClientPkpPasskey)
-					: null}
+			{@const pkpPasskeyData = currentPkpData}
 
 			<header class="mb-6 text-center md:mb-8 md:text-left">
 				<h1 class="font-playfair-display text-prussian-blue text-3xl font-normal md:text-4xl">
@@ -291,7 +332,6 @@
 			<div
 				class="relative flex flex-grow flex-col gap-8 p-4 md:min-h-0 md:flex-row md:gap-10 md:p-0"
 			>
-				<!-- Overlay for mobile when aside is open -->
 				{#if $mobileMenuStore.isOpen}
 					<div
 						class="fixed inset-0 z-20 bg-black/30 md:hidden"
@@ -300,7 +340,6 @@
 					></div>
 				{/if}
 
-				<!-- Aside Navigation -->
 				<aside
 					class="bg-background-app fixed top-16 bottom-0 left-0 z-30 w-72 transform p-4 shadow-xl transition-transform duration-300 ease-in-out {$mobileMenuStore.isOpen
 						? 'translate-x-0'
@@ -309,11 +348,10 @@
 					<nav class="space-y-2">
 						{#each tabs as tab}
 							{#if tab.id === 'passkeyDetails' && !pkpPasskeyData}
-								<!-- Do not render Passkey Details tab if pkpPasskeyData is not present -->
-							{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits') && !hasHominioWallet}
-								<!-- Do not render Auth Methods or Capacity Credits if no Hominio Wallet -->
+								<!-- Do not render -->
+							{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits' || tab.id === 'signMessage') && !hasHominioWallet}
+								<!-- Do not render these if no Hominio Wallet -->
 							{:else if tab.id === 'walletManagement' && newPkpEthAddress && !hasHominioWallet}
-								<!-- If wallet just created but session not yet updated, still show wallet tab -->
 								<button
 									onclick={() => {
 										activeTab = tab.id;
@@ -342,17 +380,14 @@
 					</nav>
 				</aside>
 
-				<!-- Main Content Area -->
 				<main
 					class="h-full w-full flex-1 space-y-6 overflow-y-auto md:mt-0 md:w-3/4"
 					style="-webkit-overflow-scrolling: touch;"
 				>
-					<!-- User Details Section -->
 					{#if activeTab === 'userDetails' && userDetails}
 						{@const profileImageUrl = userDetails.image || userDetails.picture}
 						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
 							<div class="flex flex-col items-center pt-1">
-								<!-- Profile Image -->
 								{#if profileImageUrl}
 									<img
 										src={profileImageUrl}
@@ -371,22 +406,18 @@
 									</div>
 								{/if}
 
-								<!-- Name -->
 								{#if userDetails.name && userDetails.name !== userDetails.email}
 									<h4 class="text-prussian-blue mb-1 text-center text-xl font-semibold md:text-2xl">
 										{userDetails.name}
 									</h4>
 								{/if}
 
-								<!-- Email -->
 								{#if userDetails.email}
 									<p class="text-prussian-blue/80 mb-6 text-center text-sm">{userDetails.email}</p>
 								{/if}
 
-								<!-- Divider -->
 								<hr class="border-timberwolf-2/50 mb-6 w-full border-t" />
 
-								<!-- Other Details -->
 								<div class="w-full space-y-3">
 									{#if userDetails.id}
 										<div
@@ -426,7 +457,6 @@
 						</div>
 					{/if}
 
-					<!-- Session Information Section -->
 					{#if activeTab === 'sessionInfo' && sessionInfo}
 						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
 							<div class="space-y-3 pt-1">
@@ -451,7 +481,6 @@
 						</div>
 					{/if}
 
-					<!-- Passkey Details Section -->
 					{#if activeTab === 'passkeyDetails' && pkpPasskeyData}
 						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
 							<div class="space-y-3 pt-1">
@@ -476,7 +505,6 @@
 						</div>
 					{/if}
 
-					<!-- Wallet Management Section -->
 					{#if activeTab === 'walletManagement'}
 						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
 							<div class="pt-1">
@@ -590,7 +618,6 @@
 						</div>
 					{/if}
 
-					<!-- Authorized Methods Section - NEW -->
 					{#if activeTab === 'authMethods'}
 						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
 							<div class="pt-1">
@@ -663,7 +690,6 @@
 						</div>
 					{/if}
 
-					<!-- Capacity Credits Section - NEW -->
 					{#if activeTab === 'capacityCredits'}
 						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
 							<div class="pt-1">
@@ -709,7 +735,27 @@
 						</div>
 					{/if}
 
-					<!-- Raw Debug Data Section -->
+					{#if activeTab === 'signMessage'}
+						{#if hasHominioWallet && currentPkpData}
+							<SignMessage
+								pkpPublicKey={currentPkpData.pubKey as Hex}
+								passkeyRawId={currentPkpData.rawId as Hex}
+								passkeyVerifierContractAddress={currentPkpData.passkeyVerifierContract as Address}
+								isSigningProcessActive={isSigningMessage}
+								signatureResult={messageSignature}
+								signingErrorDetail={messageSigningError}
+								on:sign={handleSignRequest}
+								on:clear={handleClearSignature}
+							/>
+						{:else}
+							<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+								<p class="text-prussian-blue/70 text-sm">
+									Please set up your Hominio Wallet to sign messages.
+								</p>
+							</div>
+						{/if}
+					{/if}
+
 					{#if activeTab === 'rawDebug'}
 						<div class="bg-background-surface rounded-xl p-6 shadow-xs">
 							<div
@@ -722,7 +768,6 @@
 				</main>
 			</div>
 		{:else}
-			<!-- This part should ideally not be reached due to the redirect in +layout.svelte -->
 			<div class="py-16 text-center">
 				<h1 class="font-playfair-display text-prussian-blue mb-6 text-4xl font-normal md:text-5xl">
 					Access Denied
@@ -741,7 +786,6 @@
 	</div>
 </div>
 
-<!-- Basic spinner style -->
 <style>
 	.spinner {
 		display: inline-block;

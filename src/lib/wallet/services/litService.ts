@@ -15,6 +15,7 @@ import { createPublicClient, http, keccak256, toBytes, bytesToHex as viemBytesTo
 import { utils as ethersUtils } from 'ethers'; // For base58 decoding if needed, or can use a modern library
 import * as ipfsOnlyHash from 'ipfs-only-hash';
 import { Buffer } from 'buffer';
+import { passkeyVerifierLitActionCode } from "../lit-actions/passkeyVerifier"; // Import the refactored Lit Action code
 
 // --- Lit Client Singleton ---
 let litNodeClient: LitJsSdk.LitNodeClient | null = null;
@@ -85,77 +86,6 @@ export interface MintPKPWithLitActionAuthResponse {
     capacityMintTxHash: Hex;
     capacityTransferTxHash: Hex;
 }
-
-// --- Lit Action Code for Passkey EIP-1271 Verification ---
-// This action is executed by Lit Protocol nodes. It verifies a passkey signature 
-// by calling the isValidSignature function on a deployed EIP-1271 verifier contract.
-export const passkeyVerifierLitActionCode = `
-const go = async () => {
-  // Ensure essential Lit and ethers objects are available in the Lit Action environment
-  if (typeof ethers === 'undefined') { 
-    throw new Error("ethers.js is not available in the Lit Action execution environment."); 
-  }
-  if (!Lit || !Lit.Actions || !Lit.Actions.getRpcUrl || !Lit.Actions.setResponse) { 
-    throw new Error("Lit.Actions API is not available in the Lit Action execution environment."); 
-  }
-
-  // These jsParams must be passed by the client when executing the Lit Action:
-  // - messageHash: The Keccak-256 hash of the message that was signed by the passkey.
-  // - formattedSignature: The passkey signature, formatted according to EIP-1271 requirements (typically ABI encoded r, s, authenticatorData, clientDataJSON).
-  // - eip1271ContractAddress: The blockchain address of the deployed EIP-1271 verifier contract for the passkey.
-  // - EIP1271_MAGIC_VALUE: The expected 'magic' return value (bytes4) from a successful isValidSignature call.
-  // - chainRpcUrl: The RPC URL for the blockchain where the eip1271ContractAddress is deployed.
-
-  if (!messageHash || !formattedSignature || !eip1271ContractAddress || !EIP1271_MAGIC_VALUE || !chainRpcUrl) {
-    throw new Error("Missing one or more required jsParams for the passkey verification Lit Action: messageHash, formattedSignature, eip1271ContractAddress, EIP1271_MAGIC_VALUE, or chainRpcUrl.");
-  }
-  if (eip1271ContractAddress.toLowerCase() === '0x0000000000000000000000000000000000000000') {
-    throw new Error("Invalid eip1271ContractAddress (null address) provided to the Lit Action.");
-  }
-
-  let verified = false;
-  const provider = new ethers.providers.JsonRpcProvider(chainRpcUrl);
-  const magicValueLower = EIP1271_MAGIC_VALUE.toLowerCase();
-  let contractCallResult;
-
-  try {
-    // Minimal ABI for the EIP-1271 isValidSignature function
-    const eip1271Interface = new ethers.utils.Interface([
-      "function isValidSignature(bytes32 _hash, bytes _signature) view returns (bytes4 magicValue)"
-    ]);
-    // Encode the function call data
-    const calldata = eip1271Interface.encodeFunctionData("isValidSignature", [messageHash, formattedSignature]);
-    
-    // Make the read-only contract call to the EIP-1271 verifier
-    contractCallResult = await provider.call({ to: eip1271ContractAddress, data: calldata });
-
-    // Check if the returned magic value matches the expected one
-    if (contractCallResult && typeof contractCallResult === 'string' && contractCallResult.toLowerCase().startsWith(magicValueLower)) {
-      verified = true;
-    }
-  } catch (e) {
-    console.error("Error during EIP-1271 isValidSignature call within Lit Action:", e);
-    // Do not re-throw here, let the final check handle the response
-  }
-  
-  // Set the Lit Action response based on verification status
-  if (verified) {
-    Lit.Actions.setResponse({ response: JSON.stringify({ verified: true, message: 'Signature verified successfully.' }) });
-  } else {
-    let errMsg = "EIP-1271 signature verification failed within Lit Action. Contract: " + eip1271ContractAddress + ", RPC: " + chainRpcUrl;
-    if (contractCallResult !== undefined) { 
-        errMsg += ". Contract call result: " + contractCallResult;
-    } else {
-        errMsg += ". Contract call did not return a result or threw an error.";
-    }
-    // For production, consider using Lit.Actions.throwError for more structured error reporting from actions.
-    // Lit.Actions.throwError({ message: errMsg, errorType: 'EIP1271VerificationError' }); 
-    throw new Error(errMsg); // This will be caught by the client executing the Lit Action
-  }
-};
-go();
-`;
-
 
 /**
  * Mints a PKP, configures a Lit Action for passkey auth, mints and transfers capacity credits.
