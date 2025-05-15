@@ -15,6 +15,7 @@ ENV NODE_ENV="production"
 
 # Throw-away build stage to reduce size of final image
 FROM base AS build
+WORKDIR /app
 
 # Install packages needed to build node modules
 RUN apt-get update -qq && \
@@ -25,31 +26,36 @@ ARG PUBLIC_BASE_URL
 # Set PUBLIC_BASE_URL as an ENV variable so vite build can access it
 ENV PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
 
-# Install node modules
-COPY .npmrc bun.lock package.json ./
-# Ensure svelte-kit sync runs before build. Modify package.json or run explicitly.
-# For now, assuming `bun install` triggers svelte-kit sync or your build script handles it.
-RUN bun install
+# Copy package-specific files and root lockfile/npmrc
+# This assumes the Docker build context is packages/wallet/
+COPY package.json ./
+COPY ../../bun.lockb ./bun.lockb
+COPY ../../.npmrc ./.npmrc
 
-# Copy application code
+# Install dependencies based on root lockfile
+# Ensure svelte-kit sync runs (usually part of prepare script in package.json, triggered by install)
+RUN bun install --frozen-lockfile --production=false
+
+# Copy application code from packages/wallet context
 COPY . .
 
 # Build application
 # The PUBLIC_BASE_URL ENV var will be available here
 RUN bun --bun run build
 
-# Remove development dependencies
+# Remove development dependencies and reinstall production ones
 RUN rm -rf node_modules && \
-    bun install --ci
+    bun install --frozen-lockfile --production
 
 
 # Final stage for app image
 FROM base
+WORKDIR /app
 
-# Copy built application
-COPY --from=build /app/build /app/build
-COPY --from=build /app/node_modules /app/node_modules
-COPY --from=build /app/package.json /app
+# Copy built application and production node_modules
+COPY --from=build /app/build ./build
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./package.json # For CMD script
 
 # Start the server by default, this can be overwritten at runtime
 EXPOSE 3000

@@ -1,3 +1,27 @@
+# Bun
+node_modules/
+.DS_Store
+*.log
+
+# SvelteKit per package
+packages/*/.svelte-kit/
+packages/*/build/
+
+# IDE / System files
+.idea/
+.vscode/
+
+# Environment files
+.env*
+!/.env.example
+
+# Build output
+dist/
+build/
+
+# Lockfiles (only root bun.lockb should be committed)
+packages/*/bun.lockb
+
 # Logs
 logs
 *.log
@@ -39,7 +63,6 @@ bower_components
 build/Release
 
 # Dependency directories
-node_modules/
 jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)
@@ -83,13 +106,12 @@ web_modules/
 .cache
 .parcel-cache
 
-# Next.js build output
-.next
-out
+# Next.js build output (if any other package uses it)
+.next/
+out/
 
-# Nuxt.js build / generate output
-.nuxt
-dist
+# Nuxt.js build / generate output (if any other package uses it)
+.nuxt/
 
 # Gatsby files
 .cache/
@@ -110,8 +132,8 @@ dist
 # vitepress cache directory
 **/.vitepress/cache
 
-# Docusaurus cache and generated files
-.docusaurus
+# Docusaurus cache and generated files (if any other package uses it)
+.docusaurus/
 
 # Serverless directories
 .serverless/

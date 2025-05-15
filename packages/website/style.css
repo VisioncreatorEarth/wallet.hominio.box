@@ -1,0 +1,11 @@
+body {
+    display: grid;
+    place-content: center;
+    min-height: 100vh;
+    margin: 0;
+    font-family: sans-serif; /* Moved from JS for better practice */
+}
+
+h1 {
+    color: #333;
+} 
