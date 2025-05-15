@@ -29,7 +29,7 @@ ENV PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
 # Copy package-specific files and root lockfile/npmrc
 # Assumes the Docker build context is the MONOREPO ROOT
 COPY packages/wallet/package.json ./package.json
-COPY bun.lock ./bun.lockb
+COPY bun.lock ./bun.lock
 COPY .npmrc ./.npmrc
 
 # Install dependencies based on root lockfile
