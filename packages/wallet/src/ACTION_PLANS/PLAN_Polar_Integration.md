@@ -25,17 +25,42 @@ This milestone focuses on testing the integration to ensure Polar customers are 
 - [x] **Verify Customer Creation in Polar**
 - [x] **Verify Webhook Reception**
 
-## Milestone 3: (Future) Expand Polar Integration (Checkout & Portal)
+## Milestone 3: Expand Polar Integration (Checkout & Portal) [IN PROGRESS]
 
-This milestone will be detailed later and will cover the integration of Polar's checkout and customer portal functionalities.
+This milestone will cover the integration of Polar's checkout and customer portal functionalities.
 
-### Subtasks:
+### Phase: Enable Customer Portal [COMPLETED]
 
-- [ ] Define requirements for checkout.
-- [ ] Define requirements for customer portal.
-- [ ] Implement Polar checkout plugin in `auth.ts`.
-- [ ] Update `betterauth-client.ts` for checkout and portal methods.
-- [ ] Configure more granular webhooks for order and subscription events.
+- [x] **Update Server-Side Auth (`auth.ts`)**
+- [x] **Update Client-Side Auth (`betterauth-client.ts`)**
+- [x] **Implement UI Element for Portal Access**
+- [x] **Test Customer Portal Access**
+
+### Current Phase: Enable Checkout
+
+- [ ] **Update Server-Side Auth (`auth.ts`)**:
+    - Import `checkout` from `@polar-sh/better-auth`.
+    - Add `checkout({...})` to the `use` array within the `polar` plugin configuration.
+    - Configure at least one product using its `productId` (e.g., `b805589e-2382-49d1-9409-73e42baeb1c7`) and a `slug` (e.g., "standard-plan").
+    - Define a `successUrl` (e.g., "/me/purchase-success?checkout_id={CHECKOUT_ID}").
+    - Set `authenticatedUsersOnly: true` (recommended for most SaaS setups).
+- [ ] **Implement UI Element for Checkout**:
+    - Add a button or link in the UI (e.g., a pricing page or upgrade button) that calls `await authClient.checkout({ slug: "standard-plan" })` (or using `productId`).
+- [ ] **Create Success Page**:
+    - Create a Svelte page for the `successUrl` (e.g., `src/routes/me/purchase-success/+page.svelte`).
+    - This page can display a success message and potentially use the `checkout_id` from the URL to fetch more details if needed (though often just confirming success is enough).
+- [ ] **Test Checkout Flow**:
+    - Log in as a test user.
+    - Click the new checkout UI element.
+    - Verify redirection to the Polar checkout page for the specified product.
+    - Complete the (sandbox) purchase.
+    - Verify redirection to your `successUrl`.
+    - Check the Customer Portal again to see if the purchase/subscription is listed.
+    - Check Polar dashboard for order/subscription records.
+
+### Future Phases for Milestone 3:
+
+- [ ] (Potentially) Configure more granular webhooks for order and subscription events if specific backend actions are needed beyond what the portal handles.
 
 ## Progress Tracking:
 
@@ -50,6 +75,17 @@ This milestone will be detailed later and will cover the integration of Polar's 
     - Perform a Test Signup: [x]
     - Verify Customer Creation in Polar: [x]
     - Verify Webhook Reception: [x]
+- **Milestone 3:** [IN PROGRESS]
+    - **Enable Customer Portal:** [COMPLETED]
+        - Update Server-Side Auth (`auth.ts`): [x]
+        - Update Client-Side Auth (`betterauth-client.ts`): [x]
+        - Implement UI Element for Portal Access: [x]
+        - Test Customer Portal Access: [x]
+    - **Enable Checkout:**
+        - Update Server-Side Auth (`auth.ts`): [ ]
+        - Implement UI Element for Checkout: [ ]
+        - Create Success Page: [ ]
+        - Test Checkout Flow: [ ]
 
 ## Milestone 4: (Future) Expand Polar Integration (Checkout & Portal)
 

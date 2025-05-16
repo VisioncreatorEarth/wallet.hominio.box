@@ -9,7 +9,6 @@ import type { Address, Hex, WalletClient } from 'viem';
 import { authClient } from '$lib/client/betterauth-client';
 import type { ClientPkpPasskey, UpdatePasskeyInfoClientArgs } from '$lib/client/pkp-passkey-plugin';
 
-
 export interface WalletSetupState {
     step: string;
     status: 'idle' | 'pending' | 'success' | 'error';

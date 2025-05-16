@@ -27,14 +27,16 @@
 		encodeFunctionData,
 		parseUnits,
 		isAddress,
-		getAddress
+		getAddress,
+		formatUnits
 	} from 'viem';
 	import { gnosis } from 'viem/chains';
 	import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
 	import { browser } from '$app/environment';
 	import { getContext, onMount } from 'svelte';
 	import type { Writable } from 'svelte/store';
-	import { goto } from '$app/navigation';
+	import { goto, afterNavigate } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { erc20Abi } from 'viem';
 	import type { SignTransactionActionParams } from '$lib/wallet/actionTypes';
 	import { shortAddress } from '$lib/utils/addressUtils';
@@ -69,7 +71,9 @@
 		{ id: 'walletManagement', label: 'Hominio Wallet' },
 		{ id: 'authMethods', label: 'Authorized Methods' },
 		{ id: 'capacityCredits', label: 'Capacity Credits' },
+		{ id: 'tokenBalance', label: 'Token Balance' },
 		{ id: 'testSigner', label: 'Test Signer' },
+		{ id: 'billingPortal', label: 'Billing & Subscriptions' },
 		{ id: 'rawDebug', label: 'Raw Debug Data' }
 	];
 
@@ -105,6 +109,12 @@
 	let sahelRecipientAddressInput = $state<string>('0x75e4Bf850Eec4c15801D16b90D259b5594b449c2');
 	let sahelAmountInput = $state<string>('0.01');
 
+	let sahelTokenBalance = $state<string | null>(null);
+	let isLoadingSahelBalance = $state(false);
+	let sahelBalanceError = $state<string | null>(null);
+	const SAHEL_TOKEN_ADDRESS: Address = '0x181CA58494Fc2C75FF805DEAA32ecD78377e135e';
+	const SAHEL_TOKEN_DECIMALS = 18;
+
 	$effect(() => {
 		eoaWalletClient = $viemWalletClientStore;
 		eoaAccountAddress = $connectedAccountStore as Address | null;
@@ -119,6 +129,42 @@
 	);
 
 	let hasHominioWallet = $derived(!!currentPkpData?.pkpEthAddress);
+
+	async function fetchSahelBalance() {
+		if (!publicClient || !currentPkpData?.pkpEthAddress) {
+			sahelBalanceError = 'Gnosis client or PKP ETH address not available.';
+			sahelTokenBalance = null;
+			return;
+		}
+		isLoadingSahelBalance = true;
+		sahelBalanceError = null;
+		sahelTokenBalance = null;
+		try {
+			const balance = await publicClient.readContract({
+				address: SAHEL_TOKEN_ADDRESS,
+				abi: erc20Abi,
+				functionName: 'balanceOf',
+				args: [currentPkpData.pkpEthAddress as Address]
+			});
+			sahelTokenBalance = formatUnits(balance, SAHEL_TOKEN_DECIMALS);
+			console.log('[MePage] Fetched SAHEL Balance:', sahelTokenBalance);
+		} catch (err: any) {
+			console.error('[MePage] Error fetching SAHEL balance:', err);
+			sahelBalanceError = `Failed to fetch SAHEL balance: ${err.message || 'Unknown error'}`;
+			sahelTokenBalance = null;
+		} finally {
+			isLoadingSahelBalance = false;
+		}
+	}
+
+	$effect(() => {
+		if (activeTab === 'tokenBalance' && hasHominioWallet && publicClient) {
+			fetchSahelBalance();
+		} else if (activeTab === 'tokenBalance' && !hasHominioWallet) {
+			sahelBalanceError = 'Hominio Wallet not set up. Cannot fetch balance.';
+			sahelTokenBalance = null;
+		}
+	});
 
 	$effect(() => {
 		async function fetchDetails() {
@@ -296,10 +342,23 @@
 		}
 	});
 
+	afterNavigate((navigation) => {
+		if (browser) {
+			const urlParams = new URLSearchParams(window.location.search);
+			const tabFromUrl = urlParams.get('tab');
+			if (tabFromUrl && tabs.some((t) => t.id === tabFromUrl)) {
+				if (activeTab !== tabFromUrl) {
+					activeTab = tabFromUrl;
+					console.log(`[MePage afterNavigate] Switched to tab from URL: ${tabFromUrl}`);
+				}
+			}
+		}
+	});
+
 	onMount(() => {
-		const initialTab = tabs.find((t) => t.id === activeTab);
-		if (initialTab && mobileMenuStore) {
-			mobileMenuStore.update((s) => ({ ...s, activeLabel: initialTab.label }));
+		const currentTabOnMount = tabs.find((t) => t.id === activeTab);
+		if (currentTabOnMount && mobileMenuStore) {
+			mobileMenuStore.update((s) => ({ ...s, activeLabel: currentTabOnMount.label }));
 		}
 	});
 
@@ -405,6 +464,24 @@
 			isTestTransactionSigning = false;
 		}
 	}
+
+	async function goToBillingPortal() {
+		try {
+			await authClient.customer.portal();
+		} catch (error) {
+			console.error('Error redirecting to Polar portal:', error);
+			alert('Could not redirect to billing portal. Please try again later.');
+		}
+	}
+
+	async function startCheckout() {
+		try {
+			await authClient.checkout({ slug: 'standard-plan' });
+		} catch (error) {
+			console.error('Error initiating checkout:', error);
+			alert('Could not start the checkout process. Please try again later.');
+		}
+	}
 </script>
 
 <div class="bg-background-app font-ibm-plex-sans text-prussian-blue h-full">
@@ -424,7 +501,7 @@
 					{#each tabs as tab}
 						{#if tab.id === 'passkeyDetails' && !pkpPasskeyData}
 							<!-- Do not render -->
-						{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits' || tab.id === 'testSigner') && !hasHominioWallet}
+						{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits' || tab.id === 'testSigner' || tab.id === 'tokenBalance') && !hasHominioWallet}
 							<!-- Do not render these if no Hominio Wallet -->
 						{:else if tab.id === 'walletManagement' && newPkpEthAddress && !hasHominioWallet}
 							<button
@@ -841,6 +918,57 @@
 								</div>
 							{/if}
 
+							{#if activeTab === 'tokenBalance'}
+								<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+									<div class="pt-1">
+										{#if !hasHominioWallet}
+											<p class="text-prussian-blue/70 text-sm">
+												Please set up your Hominio Wallet to view your token balance.
+											</p>
+										{:else if isLoadingSahelBalance}
+											<div class="flex items-center justify-start p-4">
+												<div class="spinner text-prussian-blue/80 mr-3 h-5 w-5"></div>
+												<p class="text-prussian-blue/80 text-sm">Loading SAHEL token balance...</p>
+											</div>
+										{:else if sahelBalanceError}
+											<div class="rounded-md bg-red-50 p-3">
+												<p class="text-sm text-red-700">
+													<span class="font-medium">Error:</span>
+													{sahelBalanceError}
+												</p>
+											</div>
+										{:else if sahelTokenBalance !== null}
+											<div class="space-y-2">
+												<p class="text-prussian-blue/90 text-lg">Your SAHEL Token Balance:</p>
+												<p class="text-persian-orange text-3xl font-semibold">
+													{sahelTokenBalance} SAHEL
+												</p>
+												<p class="text-prussian-blue/70 text-xs">
+													On Gnosis Chain for address: <span class="font-mono break-all"
+														>{currentPkpData?.pkpEthAddress}</span
+													>
+												</p>
+												<button
+													onclick={fetchSahelBalance}
+													disabled={isLoadingSahelBalance}
+													class="focus:ring-persian-orange/70 hover:bg-opacity-90 mt-4 rounded-lg bg-slate-200 px-4 py-2 text-xs font-medium text-slate-700 shadow-sm transition-colors focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+												>
+													{#if isLoadingSahelBalance}
+														<span class="spinner-tiny mr-1.5"></span>Refreshing...
+													{:else}
+														Refresh Balance
+													{/if}
+												</button>
+											</div>
+										{:else}
+											<p class="text-prussian-blue/70 text-sm">
+												Could not retrieve SAHEL token balance. Try refreshing.
+											</p>
+										{/if}
+									</div>
+								</div>
+							{/if}
+
 							{#if activeTab === 'testSigner'}
 								<div class="bg-timberwolf-1/40 rounded-lg p-6 shadow">
 									<h3 class="font-playfair-display text-prussian-blue mb-6 text-2xl">
@@ -993,6 +1121,50 @@
 											{#if testTransactionError}
 												<p class="mt-3 text-xs text-red-600">Error: {testTransactionError}</p>
 											{/if}
+										</section>
+									</div>
+								</div>
+							{/if}
+
+							{#if activeTab === 'billingPortal'}
+								<div class="bg-background-surface rounded-xl p-6 shadow-xs">
+									<div class="space-y-8 pt-1">
+										<section>
+											<h3 class="font-playfair-display text-prussian-blue mb-4 text-xl">
+												Manage Existing Services
+											</h3>
+											<p class="text-prussian-blue/80 mb-6 text-sm">
+												Click the button below to securely access your customer portal. You can view
+												your orders, manage subscriptions, and update payment methods.
+											</p>
+											<button
+												onclick={goToBillingPortal}
+												class="bg-prussian-blue text-linen focus:ring-prussian-blue/70 hover:bg-opacity-90 rounded-lg px-5 py-2.5 text-sm font-medium shadow-md transition-colors focus:ring-2 focus:outline-none"
+											>
+												Go to Customer Portal
+											</button>
+										</section>
+
+										<hr class="border-timberwolf-2/30" />
+
+										<section>
+											<h3 class="font-playfair-display text-prussian-blue mb-4 text-xl">
+												Purchase New Services
+											</h3>
+											<p class="text-prussian-blue/80 mb-2 text-sm">
+												Standard Plan (Product ID: ...{currentPkpData?.pkpEthAddress
+													? 'b805...b1c7'
+													: 'N/A'} )
+											</p>
+											<p class="text-prussian-blue/70 mb-6 text-xs">
+												Access to all standard features, perfect for individual users.
+											</p>
+											<button
+												onclick={startCheckout}
+												class="bg-persian-orange text-linen focus:ring-persian-orange/70 hover:bg-opacity-90 rounded-lg px-5 py-2.5 text-sm font-medium shadow-md transition-colors focus:ring-2 focus:outline-none"
+											>
+												Purchase Standard Plan
+											</button>
 										</section>
 									</div>
 								</div>

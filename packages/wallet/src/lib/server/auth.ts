@@ -3,7 +3,7 @@ import { PUBLIC_BASE_URL } from '$env/static/public';
 import { betterAuth } from "better-auth";
 import pkg from 'pg';
 import { pkpPasskeyServerPlugin } from './pkp-passkey-plugin';
-import { polar, webhooks } from '@polar-sh/better-auth';
+import { polar, webhooks, portal, checkout } from '@polar-sh/better-auth';
 import { Polar } from '@polar-sh/sdk';
 const { Pool } = pkg;
 
@@ -53,6 +53,17 @@ export const auth = betterAuth({
                     onCustomerUpdated: async (payload) => {
                         console.log('Specific Handler: Polar Customer Updated - ID:', payload.data.id, 'External ID:', payload.data.externalId);
                     }
+                }),
+                portal(),
+                checkout({
+                    products: [
+                        {
+                            productId: "b805589e-2382-49d1-9409-73e42baeb1c7",
+                            slug: "standard-plan"
+                        }
+                    ],
+                    successUrl: "/me?tab=tokenBalance&checkout_id={CHECKOUT_ID}",
+                    authenticatedUsersOnly: true
                 })
             ]
         })

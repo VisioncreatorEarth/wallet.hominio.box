@@ -25,7 +25,9 @@ jobs:
             BETTER_AUTH_SECRET="${{ secrets.SECRET_BETTER_AUTH_SECRET }}" \
             SECRET_DATABASE_URL_AUTH="${{ secrets.SECRET_DATABASE_URL_AUTH }}" \
             SECRET_GOOGLE_CLIENT_ID="${{ secrets.SECRET_GOOGLE_CLIENT_ID }}" \
-            SECRET_GOOGLE_CLIENT_SECRET="${{ secrets.SECRET_GOOGLE_CLIENT_SECRET }}"
+            SECRET_GOOGLE_CLIENT_SECRET="${{ secrets.SECRET_GOOGLE_CLIENT_SECRET }}" \
+            SECRET_POLAR_WEBHOOK_SECRET="${{ secrets.SECRET_POLAR_WEBHOOK_SECRET }}" \
+            SECRET_POLAR_ACCESS_TOKEN="${{ secrets.SECRET_POLAR_ACCESS_TOKEN }}"
       - name: Deploy to Fly.io
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
