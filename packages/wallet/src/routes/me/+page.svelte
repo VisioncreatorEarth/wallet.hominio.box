@@ -21,14 +21,18 @@
 	import { browser } from '$app/environment';
 	import { getContext, onMount } from 'svelte';
 	import type { Writable } from 'svelte/store';
+	import { goto } from '$app/navigation';
 
 	// NEW: Import SignMessage component and signing service
 	// import SignMessage from '$lib/components/SignMessage.svelte';
 	// import { signMessageWithPkp } from '$lib/wallet/services/litSigningService';
 
 	// Get modal control functions from context
-	const openSignMessageModalFromLayout = getContext<() => void>('openSignMessageModal');
-	const openExecute42ActionModalFromLayout = getContext<() => void>('openExecute42ActionModal');
+	const openSignMessageModalFromLayout =
+		getContext<(message?: string) => void>('openSignMessageModal');
+	const openExecuteLitActionModalFromLayout = getContext<
+		(cid?: string, jsParams?: Record<string, unknown>) => void
+	>('openExecuteLitActionModal');
 
 	interface MobileMenuStore {
 		isOpen: boolean;
@@ -75,10 +79,12 @@
 	let isLoadingWalletDetails = $state(false);
 	let walletDetailsError = $state<string | null>(null);
 
-	// REMOVED: State for message signing
-	// let isSigningMessage = $state(false);
-	// let messageSignature = $state<Hex | null>(null);
-	// let messageSigningError = $state<string | null>(null);
+	// State for dynamic inputs for Test Signer
+	let customMessageText = $state('');
+	let customLitActionCidText = $state('local:example-42.js'); // Default to example CID
+	let customJsParamsText = $state(JSON.stringify({ magicNumber: 42 }, null, 2));
+
+	const jsParamsPlaceholderString = '{"key": "value"}';
 
 	$effect(() => {
 		eoaWalletClient = $viemWalletClientStore;
@@ -537,7 +543,7 @@
 												</div>
 												<button
 													onclick={disconnectMetaMask}
-													class="rounded bg-red-500 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-600"
+													class="rounded border border-[var(--color-rosy-brown)] px-2 py-1 text-xs font-medium text-[var(--color-rosy-brown)] transition-colors hover:bg-[var(--color-rosy-brown)]/10 focus:ring-2 focus:ring-[var(--color-rosy-brown)]/50 focus:outline-none"
 													title="Disconnect EOA Wallet"
 												>
 													Disconnect
@@ -729,17 +735,104 @@
 									<h4 class="text-prussian-blue mb-4 text-lg font-semibold">Test Signer Actions</h4>
 									{#if hasHominioWallet}
 										<div class="space-y-3">
+											<!-- Inputs for Custom Message Signing -->
+											<div class="border-timberwolf-2/30 my-4 space-y-2 border-t border-b py-4">
+												<div>
+													<label
+														for="customMessageToSign"
+														class="text-prussian-blue/80 mb-1 block text-xs font-medium"
+														>Custom Message to Sign:</label
+													>
+													<textarea
+														id="customMessageToSign"
+														rows="3"
+														bind:value={customMessageText}
+														placeholder="Enter message to sign..."
+														class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 text-xs shadow-sm sm:text-sm"
+													></textarea>
+												</div>
+											</div>
 											<button
-												onclick={() => openSignMessageModalFromLayout?.()}
+												onclick={() => {
+													const messageToSign = customMessageText.trim();
+													if (!messageToSign) {
+														// Optionally, open modal with default message if input is empty, or navigate with no message param
+														goto('/me?actionType=signMessage'); // Triggers default message in layout
+														// openSignMessageModalFromLayout?.(); // Alternative: direct call for default
+														return;
+													}
+													const params = new URLSearchParams();
+													params.set('actionType', 'signMessage');
+													params.set('message', messageToSign); // No need to encode if using URLSearchParams
+													goto(`/me?${params.toString()}`);
+												}}
 												class="mt-2 w-full rounded-lg bg-[var(--color-prussian-blue)] px-5 py-2.5 text-sm font-medium text-[var(--color-linen)] transition-colors hover:brightness-90 focus:ring-2 focus:ring-[var(--color-persian-orange)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 											>
-												Sign Test Message
+												Sign Custom Message
 											</button>
+
+											<!-- Inputs for Custom Lit Action -->
+											<div class="border-timberwolf-2/30 my-4 space-y-2 border-t border-b py-4">
+												<div>
+													<label
+														for="customLitActionCid"
+														class="text-prussian-blue/80 mb-1 block text-xs font-medium"
+														>Custom Lit Action CID:</label
+													>
+													<input
+														id="customLitActionCid"
+														type="text"
+														bind:value={customLitActionCidText}
+														placeholder="Enter Lit Action CID (e.g., local:example-42.js)"
+														class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 text-xs shadow-sm sm:text-sm"
+													/>
+												</div>
+												<div>
+													<label
+														for="customJsParams"
+														class="text-prussian-blue/80 mb-1 block text-xs font-medium"
+														>Custom JS Params (JSON):</label
+													>
+													<textarea
+														id="customJsParams"
+														rows="3"
+														bind:value={customJsParamsText}
+														placeholder={jsParamsPlaceholderString}
+														class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 font-mono text-xs shadow-sm sm:text-sm"
+													></textarea>
+												</div>
+											</div>
+
 											<button
-												onclick={() => openExecute42ActionModalFromLayout?.()}
+												onclick={() => {
+													let parsedJsParams = {};
+													try {
+														parsedJsParams = customJsParamsText.trim()
+															? JSON.parse(customJsParamsText)
+															: {};
+													} catch (e) {
+														alert('Invalid JSON in JS Params. Please correct it.');
+														return;
+													}
+													const cidToExecute = customLitActionCidText.trim();
+													if (!cidToExecute) {
+														// Navigate with no CID to trigger default CID in layout, or handle as error
+														goto(
+															`/me?actionType=executeLitAction&jsParams=${encodeURIComponent(JSON.stringify(parsedJsParams))}`
+														);
+														return;
+													}
+													const params = new URLSearchParams();
+													params.set('actionType', 'executeLitAction');
+													params.set('cid', cidToExecute);
+													if (Object.keys(parsedJsParams).length > 0) {
+														params.set('jsParams', JSON.stringify(parsedJsParams));
+													}
+													goto(`/me?${params.toString()}`);
+												}}
 												class="mt-2 w-full rounded-lg bg-[var(--color-prussian-blue)] px-5 py-2.5 text-sm font-medium text-[var(--color-linen)] transition-colors hover:brightness-90 focus:ring-2 focus:ring-[var(--color-persian-orange)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 											>
-												Execute Test Lit Action (42)
+												Execute Lit Action by CID
 											</button>
 										</div>
 									{:else}

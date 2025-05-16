@@ -3,6 +3,7 @@
 	// import { createEventDispatcher } from 'svelte'; // REMOVED
 	import type { ExecuteJsResponse } from '@lit-protocol/types';
 	import { example42LitActionCode } from '../wallet/lit-actions/example-42';
+	import { fetchCodeFromIpfs } from '$lib/utils/ipfsUtils'; // IMPORT NEW UTILITY
 
 	import type {
 		ActionType, // Keep for clarity if needed, though actionRequest.type is primary
@@ -51,26 +52,61 @@
 	let litActionCodeInput = $state(example42LitActionCode);
 	let jsParamsInput = $state(JSON.stringify({ magicNumber: 42 }, null, 2));
 
+	// NEW states for CID-based Lit Action fetching
+	let fetchedLitCode = $state<string | null>(null);
+	let isFetchingCode = $state(false);
+	let fetchCodeError = $state<string | null>(null);
+
 	const jsParamsPlaceholder = '{"param1": "value1", "param2": 123}';
 
 	$effect(() => {
-		if (actionRequest) {
-			// Set input fields based on the type of action requested
-			if (actionRequest.type === 'signMessage') {
-				messageToSignInput = (actionRequest.params as SignMessageActionParams).messageToSign;
-			} else if (actionRequest.type === 'executeLitAction') {
-				litActionCodeInput = (actionRequest.params as ExecuteLitActionParams).litActionCode;
-				jsParamsInput = JSON.stringify(
-					(actionRequest.params as ExecuteLitActionParams).jsParams,
-					null,
-					2
-				);
+		// $effect is synchronous
+		const currentActionReq = actionRequest; // Capture current value for async operation
+
+		async function performLitActionFetch(cid: string) {
+			isFetchingCode = true;
+			fetchCodeError = null;
+			try {
+				console.log(`[Signer.svelte] Fetching code for CID: ${cid}`);
+				fetchedLitCode = await fetchCodeFromIpfs(cid);
+				console.log('[Signer.svelte] Code fetched successfully.');
+			} catch (err: any) {
+				console.error('[Signer.svelte] Error fetching Lit Action code:', err);
+				fetchedLitCode = null;
+				fetchCodeError = err.message || 'Failed to fetch Lit Action code.';
+			} finally {
+				isFetchingCode = false;
+			}
+		}
+
+		if (currentActionReq) {
+			// Reset fetched code states initially for any new request
+			fetchedLitCode = null;
+			isFetchingCode = false;
+			fetchCodeError = null;
+
+			if (currentActionReq.type === 'signMessage') {
+				messageToSignInput = (currentActionReq.params as SignMessageActionParams).messageToSign;
+			} else if (currentActionReq.type === 'executeLitAction') {
+				const params = currentActionReq.params as ExecuteLitActionParams;
+				jsParamsInput = JSON.stringify(params.jsParams, null, 2);
+
+				if (params.litActionCid) {
+					performLitActionFetch(params.litActionCid); // Call the async function
+				} else {
+					fetchedLitCode = null;
+					fetchCodeError = 'Lit Action CID is missing in the request.';
+					isFetchingCode = false; // Ensure this is false if no CID
+				}
 			}
 		} else {
-			// If actionRequest becomes null, reset fields
+			// If actionRequest becomes null, reset all fields
 			messageToSignInput = '';
-			litActionCodeInput = example42LitActionCode;
+			litActionCodeInput = example42LitActionCode; // Reset this for now
 			jsParamsInput = JSON.stringify({ magicNumber: 42 }, null, 2);
+			fetchedLitCode = null;
+			isFetchingCode = false;
+			fetchCodeError = null;
 		}
 	});
 
@@ -93,8 +129,8 @@
 			};
 			eventDetail = { type: 'signMessage', uiParams };
 		} else if (actionRequest.type === 'executeLitAction') {
-			if (!litActionCodeInput.trim()) {
-				alert('Please provide Lit Action code.');
+			if (!fetchedLitCode) {
+				alert('Please fetch the Lit Action code first.');
 				return;
 			}
 			let jsParamsParsed = {};
@@ -105,7 +141,7 @@
 				return;
 			}
 			const uiParams: SimplifiedExecuteLitActionUiParams = {
-				litActionCode: litActionCodeInput,
+				litActionCode: fetchedLitCode,
 				jsParams: jsParamsParsed
 			};
 			eventDetail = { type: 'executeLitAction', uiParams };
@@ -121,6 +157,10 @@
 		messageToSignInput = '';
 		litActionCodeInput = example42LitActionCode;
 		jsParamsInput = JSON.stringify({ magicNumber: 42 }, null, 2);
+		// Also clear fetched code states
+		fetchedLitCode = null;
+		isFetchingCode = false;
+		fetchCodeError = null;
 		// dispatch('close'); // REPLACED - Parent handles clearing results and request via this callback
 		onClose(); // CALLED PROP
 	}
@@ -186,17 +226,50 @@
 		<!-- Execute Lit Action Section -->
 		{#if actionRequest?.type === 'executeLitAction'}
 			<div class="mb-4">
-				<label for="litActionCodeInput" class="text-prussian-blue/80 mb-1 block text-sm font-medium"
-					>Lit Action Code:</label
+				<label
+					for="litActionCidDisplay"
+					class="text-prussian-blue/80 mb-1 block text-sm font-medium">Lit Action CID:</label
 				>
-				<textarea
-					id="litActionCodeInput"
-					rows="8"
-					class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 font-mono text-xs shadow-sm disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500 disabled:shadow-none sm:text-sm"
-					placeholder="Enter the Lit Action JavaScript code..."
-					bind:value={litActionCodeInput}
-					disabled={!canProcess || isProcessing}
-				></textarea>
+				<input
+					id="litActionCidDisplay"
+					type="text"
+					class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-slate-100 p-2 font-mono text-xs shadow-sm sm:text-sm"
+					value={(actionRequest.params as ExecuteLitActionParams).litActionCid || 'N/A'}
+					readonly
+				/>
+			</div>
+			<div class="mb-4">
+				<label
+					for="litActionCodeDisplay"
+					class="text-prussian-blue/80 mb-1 block text-sm font-medium">Lit Action Code:</label
+				>
+				{#if isFetchingCode}
+					<div
+						class="text-prussian-blue/80 flex items-center rounded-md border border-slate-200 bg-slate-50 p-3 text-sm"
+					>
+						<div class="spinner-tiny mr-2"></div>
+						Fetching code...
+					</div>
+				{:else if fetchCodeError}
+					<div class="rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-700">
+						Error: {fetchCodeError}
+					</div>
+				{:else if fetchedLitCode}
+					<textarea
+						id="litActionCodeDisplay"
+						rows="8"
+						class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-slate-100 p-2 font-mono text-xs shadow-sm sm:text-sm"
+						bind:value={fetchedLitCode}
+						readonly
+						disabled={true}
+					></textarea>
+				{:else}
+					<div
+						class="text-prussian-blue/60 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm italic"
+					>
+						No code fetched or available.
+					</div>
+				{/if}
 			</div>
 			<div class="mb-4">
 				<label for="jsParamsInput" class="text-prussian-blue/80 mb-1 block text-sm font-medium"
@@ -265,14 +338,13 @@
 					!actionRequest ||
 					(actionRequest.type === 'signMessage' && !messageToSignInput.trim()) ||
 					(actionRequest.type === 'executeLitAction' &&
-						(!litActionCodeInput.trim() || !jsParamsInput.trim())) ||
+						(!fetchedLitCode || !jsParamsInput.trim())) ||
 					isProcessing}
 				class="rounded-2xl px-4 py-2 text-sm font-medium transition-colors
 					   {!canProcess ||
 				!actionRequest ||
 				(actionRequest.type === 'signMessage' && !messageToSignInput.trim()) ||
-				(actionRequest.type === 'executeLitAction' &&
-					(!litActionCodeInput.trim() || !jsParamsInput.trim())) ||
+				(actionRequest.type === 'executeLitAction' && (!fetchedLitCode || !jsParamsInput.trim())) ||
 				isProcessing
 					? 'cursor-not-allowed bg-slate-300 text-slate-500'
 					: 'bg-prussian-blue text-linen hover:bg-opacity-90 focus:ring-persian-orange focus:ring-2 focus:outline-none'}"

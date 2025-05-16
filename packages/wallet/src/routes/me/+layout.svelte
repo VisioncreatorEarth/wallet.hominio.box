@@ -5,13 +5,14 @@
 	import { onDestroy, onMount, setContext } from 'svelte';
 	import { writable, type Writable } from 'svelte/store';
 	import { chainNameStore, viemPublicClientStore } from '$lib/stores/walletStore';
+	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 
 	import { initializeLitClient } from '$lib/wallet/lit-connect';
 	import type { LitNodeClient } from '@lit-protocol/lit-node-client';
 	import { disconnectWeb3 } from '@lit-protocol/auth-browser'; // Import disconnectWeb3
 	import { authClient } from '$lib/client/betterauth-client';
 	import { browser } from '$app/environment';
-	import { goto } from '$app/navigation';
 	import Signer from '$lib/components/Signer.svelte'; // Renamed from SignMessage.svelte
 	import {
 		signMessageWithPkp,
@@ -48,6 +49,8 @@
 	let currentActionRequest = $state<RequestActionDetail | null>(null);
 	let actionPrimaryResult = $state<Hex | ExecuteJsResponse | null>(null);
 	let actionErrorDetail = $state<string | null>(null);
+
+	let lastSuccessfullyProcessedSearchParamsString = $state<string | null>(null);
 
 	const currentProcessResultStore: Writable<ActionResultDetail | null> = writable(null);
 
@@ -237,12 +240,48 @@
 		console.log('[Layout] handleClearActionResult: currentProcessResultStore set to null');
 	}
 
-	function openSignMessageModal() {
+	// New function to handle the full modal close sequence
+	function triggerModalCloseSequence() {
+		isActionModalOpen = false;
+		const paramsThatWereActiveWhenModalOpened = lastSuccessfullyProcessedSearchParamsString;
+		const currentUrlParamsWhenClosing = $page.url.searchParams.toString();
+
+		console.log(
+			'[Modal triggerModalCloseSequence] Attempting to clear. Params active at open:',
+			paramsThatWereActiveWhenModalOpened
+		);
+		console.log(
+			'[Modal triggerModalCloseSequence] Current URL params at close:',
+			currentUrlParamsWhenClosing
+		);
+
+		handleClearActionResult(); // Clears request, result store etc.
+
+		if (
+			currentUrlParamsWhenClosing === paramsThatWereActiveWhenModalOpened &&
+			paramsThatWereActiveWhenModalOpened &&
+			paramsThatWereActiveWhenModalOpened !== ''
+		) {
+			console.log(
+				'[Modal triggerModalCloseSequence] Match found. Clearing URL params:',
+				paramsThatWereActiveWhenModalOpened
+			);
+			goto($page.url.pathname, { replaceState: true, keepFocus: true, invalidateAll: false });
+		} else {
+			console.log(
+				'[Modal triggerModalCloseSequence] No match or params already cleared. Not clearing URL.'
+			);
+			console.log(`  - Current URL: ${currentUrlParamsWhenClosing}`);
+			console.log(`  - Params active at open: ${paramsThatWereActiveWhenModalOpened}`);
+		}
+	}
+
+	function openSignMessageModal(message?: string) {
 		if (!currentPkpData) return;
 		currentActionRequest = {
 			type: 'signMessage',
 			params: {
-				messageToSign: 'Hello from Hominio Wallet! Sign this.',
+				messageToSign: message || 'Hello from Hominio Wallet! Sign this.',
 				pkpPublicKey: currentPkpData.pubKey as Hex,
 				passkeyRawId: currentPkpData.rawId as Hex,
 				passkeyVerifierContractAddress: currentPkpData.passkeyVerifierContract as Address,
@@ -251,16 +290,17 @@
 		};
 		actionPrimaryResult = null;
 		actionErrorDetail = null;
+		currentProcessResultStore.set(null); // Ensure store is cleared before new action
 		isActionModalOpen = true;
 	}
 
-	function openExecute42ActionModal() {
+	function openExecuteLitActionModal(litActionCid?: string, jsParams?: Record<string, any>) {
 		if (!currentPkpData) return;
 		currentActionRequest = {
 			type: 'executeLitAction',
 			params: {
-				litActionCode: example42LitActionCode,
-				jsParams: { magicNumber: Math.floor(Math.random() * 100) },
+				litActionCid: litActionCid || 'local:example-42.js', // Placeholder CID
+				jsParams: jsParams || { magicNumber: Math.floor(Math.random() * 100) },
 				pkpPublicKey: currentPkpData.pubKey as Hex,
 				passkeyRawId: currentPkpData.rawId as Hex,
 				passkeyVerifierContractAddress: currentPkpData.passkeyVerifierContract as Address,
@@ -269,11 +309,108 @@
 		};
 		actionPrimaryResult = null;
 		actionErrorDetail = null;
+		currentProcessResultStore.set(null); // Ensure store is cleared before new action
 		isActionModalOpen = true;
 	}
 
 	setContext('openSignMessageModal', openSignMessageModal);
-	setContext('openExecute42ActionModal', openExecute42ActionModal);
+	setContext('openExecuteLitActionModal', openExecuteLitActionModal);
+
+	// Effect to process URL query parameters for actions
+	$effect(() => {
+		const currentUrl = $page.url;
+		const currentSearchParamsString = currentUrl.searchParams.toString();
+		const actionTypeFromUrl = currentUrl.searchParams.get('actionType');
+
+		if (
+			currentSearchParamsString &&
+			currentSearchParamsString !== lastSuccessfullyProcessedSearchParamsString
+		) {
+			// Potential new action params in URL that we haven't successfully processed
+			if (actionTypeFromUrl && currentPkpData) {
+				console.log(
+					'[Layout URL Effect] Attempting to process new URL action params:',
+					currentSearchParamsString
+				);
+				let message: string | undefined;
+				let cid: string | undefined;
+				let jsParamsString: string | null;
+				let jsParamsObject: Record<string, unknown> | undefined;
+				let actionTaken = false;
+
+				if (actionTypeFromUrl === 'signMessage') {
+					const messageParam = currentUrl.searchParams.get('message');
+					if (messageParam) {
+						try {
+							message = decodeURIComponent(messageParam);
+							openSignMessageModal(message);
+							actionTaken = true;
+						} catch (e) {
+							console.error('[Layout URL Effect] Error decoding message from URL:', e);
+						}
+					}
+				} else if (actionTypeFromUrl === 'executeLitAction') {
+					const cidParam = currentUrl.searchParams.get('cid');
+					if (cidParam) {
+						try {
+							cid = decodeURIComponent(cidParam);
+							jsParamsString = currentUrl.searchParams.get('jsParams');
+							if (jsParamsString) {
+								try {
+									jsParamsObject = JSON.parse(decodeURIComponent(jsParamsString));
+								} catch (e) {
+									console.error('[Layout URL Effect] Failed to parse jsParams from URL:', e);
+								}
+							}
+							openExecuteLitActionModal(cid, jsParamsObject);
+							actionTaken = true;
+						} catch (e) {
+							console.error('[Layout URL Effect] Error decoding CID from URL:', e);
+						}
+					}
+				}
+
+				if (actionTaken) {
+					lastSuccessfullyProcessedSearchParamsString = currentSearchParamsString; // Mark as "processing this now"
+					console.log(
+						'[Layout URL Effect] URL action initiated. Modal opened. Params remain in URL.'
+					);
+				} else {
+					// Action type was present, but not taken (bad params, no PKP, etc.)
+					lastSuccessfullyProcessedSearchParamsString = currentSearchParamsString; // Mark faulty params as seen
+					console.log(
+						'[Layout URL Effect] URL action type found, but not processed/failed. Marked as seen:',
+						currentSearchParamsString
+					);
+				}
+			} else {
+				// Params present (currentSearchParamsString is true), but no actionType or no PKP. Mark as seen.
+				lastSuccessfullyProcessedSearchParamsString = currentSearchParamsString;
+				console.log(
+					'[Layout URL Effect] URL params present but no action/PKP. Marked as seen:',
+					currentSearchParamsString
+				);
+			}
+		} else if (!currentSearchParamsString && lastSuccessfullyProcessedSearchParamsString !== '') {
+			// URL params were just cleared (current is empty, last was not empty)
+			console.log(
+				'[Layout URL Effect] URL params appear to have been cleared. Last processed was:',
+				lastSuccessfullyProcessedSearchParamsString
+			);
+			lastSuccessfullyProcessedSearchParamsString = ''; // Update to reflect cleared state
+		} else if (
+			currentSearchParamsString &&
+			currentSearchParamsString === lastSuccessfullyProcessedSearchParamsString
+		) {
+			// URL params are identical to what we just processed or saw. Do nothing.
+			// This covers the immediate re-run of the effect before goto has updated $page.url fully.
+			console.log(
+				'[Layout URL Effect] URL params unchanged from last seen/processed. No action.',
+				currentSearchParamsString
+			);
+		}
+		// If currentSearchParamsString is "" and lastSuccessfullyProcessedSearchParamsString is already "", do nothing.
+	});
 
 	onMount(async () => {
 		publicClientInstance = createPublicClient({
@@ -461,10 +598,7 @@
 		{#if isActionModalOpen && currentPkpData && currentActionRequest}
 			<Modal
 				isOpen={isActionModalOpen}
-				onClose={() => {
-					isActionModalOpen = false;
-					handleClearActionResult();
-				}}
+				onClose={triggerModalCloseSequence}
 				title={currentActionRequest.type === 'signMessage'
 					? 'Sign a Message'
 					: 'Execute Lit Action'}
@@ -473,7 +607,7 @@
 					actionRequest={currentActionRequest}
 					isProcessing={isProcessingAction}
 					processResult={$currentProcessResultStore}
-					onClose={handleClearActionResult}
+					onClose={triggerModalCloseSequence}
 					onExecute={handleActionExecuteRequest}
 				/>
 			</Modal>

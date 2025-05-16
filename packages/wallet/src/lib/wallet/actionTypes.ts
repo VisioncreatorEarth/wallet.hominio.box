@@ -16,7 +16,7 @@ export interface SignMessageActionParams extends BaseActionParams {
 }
 
 export interface ExecuteLitActionParams extends BaseActionParams {
-    litActionCode: string;
+    litActionCid: string;
     jsParams: Record<string, unknown>;
 }
 
