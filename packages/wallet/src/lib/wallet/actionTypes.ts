@@ -20,13 +20,22 @@ export interface ExecuteLitActionParams extends BaseActionParams {
     jsParams: Record<string, unknown>;
 }
 
+// NEW type for structured display identity
+export interface DisplayIdentity {
+    address: Address;
+    name?: string;
+    imageUrl?: string;
+    shortAddress?: string;
+}
+
 export interface SignTransactionActionParams extends BaseActionParams {
     transaction: TransactionSerializable;
     transactionDisplayInfo?: {
         description?: string;
         tokenSymbol?: string;
         amount?: string;
-        recipient?: string;
+        senderIdentifier?: Address | Hex;
+        recipientAddress?: Address;
     };
 }
 

@@ -37,11 +37,13 @@
 		SimplifiedSignTransactionUiParams,
 		ActionResultDetail,
 		SignTransactionActionParams,
-		SignTransactionActionResultDetail
+		SignTransactionActionResultDetail,
+		DisplayIdentity
 	} from '$lib/wallet/actionTypes';
 	import { example42LitActionCode } from '$lib/wallet/lit-actions/example-42';
 	import type { ExecuteJsResponse } from '@lit-protocol/types';
 	import Modal from '$lib/components/Modal.svelte';
+	import { resolvePkpIdentityInfo, type MinimalSessionData } from '$lib/utils/addressUtils';
 
 	let publicClientInstance: PublicClient;
 	const litClientStore: Writable<LitNodeClient | null> = writable(null);
@@ -413,15 +415,30 @@
 	// New function to open modal for signing transactions
 	function openSignTransactionModal(
 		transaction: TransactionSerializable,
-		displayInfo?: SignTransactionActionParams['transactionDisplayInfo']
+		displayInfoFromPage?: SignTransactionActionParams['transactionDisplayInfo'] // This type now expects senderIdentifier and recipientAddress
 	) {
 		if (!currentPkpData) return;
+
+		// Identity resolution will now happen in Signer.svelte
+		// We pass the raw identifiers here.
+
+		const senderEthAddress = currentPkpData.pkpEthAddress as Address;
+		// displayInfoFromPage should now contain recipientAddress directly
+		const recipientEthAddress = displayInfoFromPage?.recipientAddress;
+
 		currentActionRequest = {
 			type: 'signTransaction',
 			params: {
 				transaction: transaction,
-				transactionDisplayInfo: displayInfo,
+				transactionDisplayInfo: {
+					description: displayInfoFromPage?.description,
+					tokenSymbol: displayInfoFromPage?.tokenSymbol,
+					amount: displayInfoFromPage?.amount,
+					senderIdentifier: senderEthAddress, // Pass raw identifier
+					recipientAddress: recipientEthAddress // Pass raw identifier
+				},
 				pkpPublicKey: currentPkpData.pubKey as Hex,
+				// pkpEthAddressForDisplay: currentPkpData.pkpEthAddress as Address, // Removed
 				passkeyRawId: currentPkpData.rawId as Hex,
 				passkeyVerifierContractAddress: currentPkpData.passkeyVerifierContract as Address,
 				pkpTokenId: currentPkpData.pkpTokenId

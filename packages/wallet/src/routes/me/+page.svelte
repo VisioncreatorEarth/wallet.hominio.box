@@ -36,6 +36,8 @@
 	import type { Writable } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { erc20Abi } from 'viem';
+	import type { SignTransactionActionParams } from '$lib/wallet/actionTypes';
+	import { shortAddress } from '$lib/utils/addressUtils';
 
 	const openSignMessageModalFromLayout =
 		getContext<(message?: string) => void>('openSignMessageModal');
@@ -43,7 +45,10 @@
 		(cid?: string, jsParams?: Record<string, unknown>) => void
 	>('openExecuteLitActionModal');
 	const openSignTransactionModalFromLayout = getContext<
-		(transaction: TransactionSerializableEIP1559, displayInfo?: { description: string }) => void
+		(
+			transaction: TransactionSerializableEIP1559,
+			displayInfo?: SignTransactionActionParams['transactionDisplayInfo']
+		) => void
 	>('openSignTransactionModal');
 
 	interface MobileMenuStore {
@@ -97,7 +102,7 @@
 	let isTestTransactionSigning = $state(false);
 	let testTransactionError = $state<string | null>(null);
 
-	let sahelRecipientAddressInput = $state<string>('0xCafe0f9a93A545d19613A945DbD5284486D4A2Ad');
+	let sahelRecipientAddressInput = $state<string>('0x75e4Bf850Eec4c15801D16b90D259b5594b449c2');
 	let sahelAmountInput = $state<string>('0.01');
 
 	$effect(() => {
@@ -385,8 +390,13 @@
 
 			console.log('Unsigned Transaction Prepared:', unsignedTx);
 
+			const userForProfileImage = $session.data?.user;
+
 			openSignTransactionModalFromLayout(unsignedTx, {
-				description: `Transfer ${amountString} SAHEL to ${recipientAddress.slice(0, 6)}...${recipientAddress.slice(-4)}`
+				amount: amountString,
+				tokenSymbol: 'SAHEL',
+				recipientAddress: recipientAddress,
+				description: `Transfer ${amountString} SAHEL to ${shortAddress(recipientAddress)}`
 			});
 		} catch (err: any) {
 			console.error('Error preparing Sahel token transfer:', err);
