@@ -62,20 +62,117 @@
 	const mobileMenuStore = getContext<Writable<MobileMenuStore>>(mobileMenuContextKey);
 
 	const session = authClient.useSession();
-	let activeTab = $state('userDetails');
 
-	const tabs = [
+	// New tab structure
+	const mainTabs = [
 		{ id: 'userDetails', label: 'User Details' },
+		{ id: 'walletAndBalance', label: 'Wallet & Balance' },
+		{ id: 'testSigner', label: 'Test Signer' },
+		{ id: 'billingSubscriptions', label: 'Billing & Subscriptions' }
+	];
+
+	const advancedCategoryLabel = 'Developer Settings';
+	const advancedTabs = [
 		{ id: 'sessionInfo', label: 'Session Information' },
 		{ id: 'passkeyDetails', label: 'Passkey Details' },
-		{ id: 'walletManagement', label: 'Hominio Wallet' },
 		{ id: 'authMethods', label: 'Authorized Methods' },
 		{ id: 'capacityCredits', label: 'Capacity Credits' },
-		{ id: 'tokenBalance', label: 'Token Balance' },
-		{ id: 'testSigner', label: 'Test Signer' },
-		{ id: 'billingPortal', label: 'Billing & Subscriptions' },
 		{ id: 'rawDebug', label: 'Raw Debug Data' }
 	];
+
+	let activeTab = $state(mainTabs[0]?.id || 'userDetails');
+	let isAdvancedOpen = $state(false);
+
+	function findTabById(tabId: string) {
+		return mainTabs.find((t) => t.id === tabId) || advancedTabs.find((t) => t.id === tabId);
+	}
+
+	function selectTab(tabId: string) {
+		const targetTab = findTabById(tabId);
+		if (!targetTab) return;
+
+		activeTab = tabId;
+		if (advancedTabs.some((t) => t.id === tabId)) {
+			isAdvancedOpen = true;
+		}
+		// No need to close advanced section if a main tab is selected, user can toggle
+
+		if (mobileMenuStore) {
+			mobileMenuStore.update((s) => ({ ...s, isOpen: false }));
+		}
+
+		if (browser) {
+			const url = new URL(window.location.href);
+			url.searchParams.set('tab', tabId);
+			history.replaceState(history.state, '', url);
+		}
+	}
+
+	$effect(() => {
+		const currentTabObject = findTabById(activeTab);
+		if (currentTabObject && mobileMenuStore) {
+			mobileMenuStore.update((s) => ({ ...s, activeLabel: currentTabObject.label }));
+		}
+	});
+
+	function processUrlTab() {
+		if (!browser) return;
+		const urlParams = new URLSearchParams(window.location.search);
+		let tabFromUrl = urlParams.get('tab');
+
+		// Map old tab IDs to new ones
+		if (tabFromUrl === 'walletManagement' || tabFromUrl === 'tokenBalance') {
+			tabFromUrl = 'walletAndBalance';
+		} else if (tabFromUrl === 'billingPortal') {
+			tabFromUrl = 'billingSubscriptions';
+		}
+		// Add other old tab ID mappings if any, e.g. 'rawDebugData' -> 'rawDebug'
+
+		const targetTab = tabFromUrl ? findTabById(tabFromUrl) : null;
+
+		if (targetTab) {
+			if (activeTab !== targetTab.id) {
+				activeTab = targetTab.id;
+			}
+			if (advancedTabs.some((t) => t.id === targetTab.id)) {
+				isAdvancedOpen = true;
+			}
+			// Ensure URL reflects the potentially mapped tabId
+			if (tabFromUrl !== targetTab.id) {
+				const url = new URL(window.location.href);
+				url.searchParams.set('tab', targetTab.id); // set the corrected one
+				history.replaceState(history.state, '', url);
+			}
+		} else if (mainTabs.length > 0 && !findTabById(activeTab)) {
+			// If current activeTab is somehow invalid and no URL tab, reset to default
+			activeTab = mainTabs[0].id;
+			isAdvancedOpen = false; // Reset advanced section state too
+			const url = new URL(window.location.href);
+			url.searchParams.set('tab', activeTab);
+			history.replaceState(history.state, '', url);
+		}
+	}
+
+	onMount(() => {
+		processUrlTab();
+		// Ensure mobile menu is correctly set after initial processing
+		const currentTabObject = findTabById(activeTab);
+		if (currentTabObject && mobileMenuStore) {
+			mobileMenuStore.update((s) => ({ ...s, isOpen: false, activeLabel: currentTabObject.label }));
+		} else if (mainTabs.length > 0 && mobileMenuStore) {
+			mobileMenuStore.update((s) => ({ ...s, isOpen: false, activeLabel: mainTabs[0].label }));
+		}
+	});
+
+	afterNavigate((navigation) => {
+		// only process if the 'tab' param is actually present or changed.
+		if (
+			navigation.to?.url.searchParams.has('tab') ||
+			navigation.from?.url.searchParams.get('tab') !== navigation.to?.url.searchParams.get('tab')
+		) {
+			processUrlTab();
+		}
+	});
 
 	function formatKey(key: string): string {
 		return key.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase());
@@ -114,6 +211,15 @@
 	let sahelBalanceError = $state<string | null>(null);
 	const SAHEL_TOKEN_ADDRESS: Address = '0x181CA58494Fc2C75FF805DEAA32ecD78377e135e';
 	const SAHEL_TOKEN_DECIMALS = 18;
+
+	$effect(() => {
+		if (activeTab === 'walletAndBalance' && hasHominioWallet && publicClient) {
+			fetchSahelBalance();
+		} else if (activeTab === 'walletAndBalance' && !hasHominioWallet) {
+			sahelBalanceError = 'Wallet not set up. Cannot fetch balance.';
+			sahelTokenBalance = null;
+		}
+	});
 
 	$effect(() => {
 		eoaWalletClient = $viemWalletClientStore;
@@ -156,15 +262,6 @@
 			isLoadingSahelBalance = false;
 		}
 	}
-
-	$effect(() => {
-		if (activeTab === 'tokenBalance' && hasHominioWallet && publicClient) {
-			fetchSahelBalance();
-		} else if (activeTab === 'tokenBalance' && !hasHominioWallet) {
-			sahelBalanceError = 'Hominio Wallet not set up. Cannot fetch balance.';
-			sahelTokenBalance = null;
-		}
-	});
 
 	$effect(() => {
 		async function fetchDetails() {
@@ -335,33 +432,6 @@
 		return new Date(Number(timestamp) * 1000).toLocaleString();
 	}
 
-	$effect(() => {
-		const currentTab = tabs.find((t) => t.id === activeTab);
-		if (currentTab && mobileMenuStore) {
-			mobileMenuStore.update((s) => ({ ...s, activeLabel: currentTab.label }));
-		}
-	});
-
-	afterNavigate((navigation) => {
-		if (browser) {
-			const urlParams = new URLSearchParams(window.location.search);
-			const tabFromUrl = urlParams.get('tab');
-			if (tabFromUrl && tabs.some((t) => t.id === tabFromUrl)) {
-				if (activeTab !== tabFromUrl) {
-					activeTab = tabFromUrl;
-					console.log(`[MePage afterNavigate] Switched to tab from URL: ${tabFromUrl}`);
-				}
-			}
-		}
-	});
-
-	onMount(() => {
-		const currentTabOnMount = tabs.find((t) => t.id === activeTab);
-		if (currentTabOnMount && mobileMenuStore) {
-			mobileMenuStore.update((s) => ({ ...s, activeLabel: currentTabOnMount.label }));
-		}
-	});
-
 	function handleInitiateSignMessage() {
 		const message = customMessageText.trim() || undefined;
 		openSignMessageModalFromLayout(message);
@@ -498,29 +568,13 @@
 					: '-translate-x-full'} overflow-y-auto md:static md:top-auto md:bottom-auto md:left-auto md:z-auto md:h-full md:w-72 md:translate-x-0 md:transform-none md:bg-transparent md:p-6 md:pt-8 md:shadow-none"
 			>
 				<nav class="space-y-2">
-					{#each tabs as tab}
-						{#if tab.id === 'passkeyDetails' && !pkpPasskeyData}
-							<!-- Do not render -->
-						{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits' || tab.id === 'testSigner' || tab.id === 'tokenBalance') && !hasHominioWallet}
-							<!-- Do not render these if no Hominio Wallet -->
-						{:else if tab.id === 'walletManagement' && newPkpEthAddress && !hasHominioWallet}
-							<button
-								onclick={() => {
-									activeTab = tab.id;
-									mobileMenuStore.update((s) => ({ ...s, isOpen: false }));
-								}}
-								class="{activeTab === tab.id
-									? 'bg-buff text-prussian-blue'
-									: 'text-prussian-blue/80 hover:bg-timberwolf-1/50'} focus:ring-persian-orange focus:ring-opacity-50 w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors duration-150 focus:ring-2 focus:outline-none"
-							>
-								{tab.label}
-							</button>
+					<!-- Main Tabs -->
+					{#each mainTabs as tab}
+						{#if tab.id === 'testSigner' && !hasHominioWallet}
+							<!-- Skip Test Signer if no wallet -->
 						{:else}
 							<button
-								onclick={() => {
-									activeTab = tab.id;
-									mobileMenuStore.update((s) => ({ ...s, isOpen: false }));
-								}}
+								onclick={() => selectTab(tab.id)}
 								class="{activeTab === tab.id
 									? 'bg-buff text-prussian-blue'
 									: 'text-prussian-blue/80 hover:bg-timberwolf-1/50'} focus:ring-persian-orange focus:ring-opacity-50 w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors duration-150 focus:ring-2 focus:outline-none"
@@ -529,6 +583,54 @@
 							</button>
 						{/if}
 					{/each}
+
+					<!-- Advanced Section Toggle -->
+					<div class="border-timberwolf-2/30 my-3 border-t pt-3">
+						<button
+							onclick={() => (isAdvancedOpen = !isAdvancedOpen)}
+							class="text-prussian-blue/80 hover:bg-timberwolf-1/50 focus:ring-persian-orange focus:ring-opacity-50 flex w-full items-center justify-between rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors duration-150 focus:ring-2 focus:outline-none"
+						>
+							<span>{advancedCategoryLabel}</span>
+							<span
+								class="transform transition-transform duration-200 {isAdvancedOpen
+									? 'rotate-180'
+									: ''}"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									class="h-4 w-4"
+									fill="none"
+									viewBox="0 0 24 24"
+									stroke="currentColor"
+									stroke-width="2"
+								>
+									<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+								</svg>
+							</span>
+						</button>
+					</div>
+
+					<!-- Advanced Tabs -->
+					{#if isAdvancedOpen}
+						<div class="space-y-2 pl-3">
+							{#each advancedTabs as tab}
+								{#if tab.id === 'passkeyDetails' && !pkpPasskeyData}
+									<!-- Skip Passkey Details if no pkpPasskeyData -->
+								{:else if (tab.id === 'authMethods' || tab.id === 'capacityCredits') && !hasHominioWallet}
+									<!-- Skip Auth Methods/Capacity Credits if no wallet -->
+								{:else}
+									<button
+										onclick={() => selectTab(tab.id)}
+										class="{activeTab === tab.id
+											? 'bg-buff text-prussian-blue'
+											: 'text-prussian-blue/80 hover:bg-timberwolf-1/50'} focus:ring-persian-orange focus:ring-opacity-50 w-full rounded-lg px-4 py-2.5 text-left text-xs font-medium transition-colors duration-150 focus:ring-2 focus:outline-none"
+									>
+										{tab.label}
+									</button>
+								{/if}
+							{/each}
+						</div>
+					{/if}
 				</nav>
 			</aside>
 
@@ -674,36 +776,66 @@
 								</div>
 							{/if}
 
-							{#if activeTab === 'walletManagement'}
+							{#if activeTab === 'walletAndBalance'}
 								<div class="bg-background-surface rounded-xl p-6 shadow-xs">
 									<div class="pt-1">
-										{#if hasHominioWallet}
-											<p class="text-prussian-blue">Your Hominio Wallet ETH Address:</p>
-											<p class="rounded bg-slate-100 p-2 font-mono text-sm break-all">
-												{$session.data?.user?.pkp_passkey &&
-												typeof $session.data.user.pkp_passkey === 'object'
-													? ($session.data.user.pkp_passkey as ClientPkpPasskey).pkpEthAddress
-													: 'Not available'}
-											</p>
-											{#if pkpPasskeyData?.pkpTokenId}
-												<div class="mt-3 text-xs text-slate-500">
-													<p>PKP Token ID: {pkpPasskeyData.pkpTokenId}</p>
-													{#if pkpPasskeyData?.pubKey}
-														<p class="mt-1">
-															PKP Public Key: <span class="break-all">{pkpPasskeyData.pubKey}</span>
+										{#if hasHominioWallet && currentPkpData?.pkpEthAddress}
+											<div class="mb-6">
+												<p class="text-prussian-blue">Your Wallet ETH Address:</p>
+												<p class="rounded bg-slate-100 p-2 font-mono text-sm break-all">
+													{currentPkpData.pkpEthAddress}
+												</p>
+											</div>
+
+											<div>
+												<h4 class="text-prussian-blue mb-3 text-lg font-semibold">
+													SAHEL Token Balance
+												</h4>
+												{#if isLoadingSahelBalance}
+													<div class="flex items-center justify-start p-4">
+														<div class="spinner text-prussian-blue/80 mr-3 h-5 w-5"></div>
+														<p class="text-prussian-blue/80 text-sm">
+															Loading SAHEL token balance...
 														</p>
-													{/if}
-												</div>
-											{/if}
+													</div>
+												{:else if sahelBalanceError}
+													<div class="rounded-md bg-red-50 p-3">
+														<p class="text-sm text-red-700">
+															<span class="font-medium">Error:</span>
+															{sahelBalanceError}
+														</p>
+													</div>
+												{:else if sahelTokenBalance !== null}
+													<div class="space-y-2">
+														<p class="text-persian-orange text-3xl font-semibold">
+															{sahelTokenBalance} SAHEL
+														</p>
+														<button
+															onclick={fetchSahelBalance}
+															disabled={isLoadingSahelBalance}
+															class="focus:ring-persian-orange/70 hover:bg-opacity-90 mt-4 rounded-lg bg-slate-200 px-4 py-2 text-xs font-medium text-slate-700 shadow-sm transition-colors focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+														>
+															{#if isLoadingSahelBalance}
+																<span class="spinner-tiny mr-1.5"></span>Refreshing...
+															{:else}
+																Refresh Balance
+															{/if}
+														</button>
+													</div>
+												{:else}
+													<p class="text-prussian-blue/70 text-sm">
+														Could not retrieve SAHEL token balance. Try refreshing.
+													</p>
+												{/if}
+											</div>
 										{:else if !eoaAccountAddress}
 											<div class="mb-6 rounded-lg border border-orange-300 bg-orange-50 p-4">
 												<h4 class="mb-2 text-lg font-semibold text-orange-700">
 													Step 1: Connect Your EOA Wallet
 												</h4>
 												<p class="text-prussian-blue/80 mb-3 text-sm">
-													To create a Hominio Wallet, you first need to connect an existing External
-													Owned Account (EOA) wallet, like MetaMask, configured for the Gnosis
-													chain.
+													To create a Wallet, you first need to connect an existing External Owned
+													Account (EOA) wallet, like MetaMask, configured for the Gnosis chain.
 												</p>
 												<button
 													onclick={connectMetaMask}
@@ -738,8 +870,8 @@
 												</button>
 											</div>
 											<p class="text-prussian-blue/90 mb-4">
-												You do not have a Hominio Wallet set up yet. Create one to manage your
-												digital assets and interactions within Hominio.
+												You do not have a Wallet set up yet. Create one to manage your digital
+												assets and interactions.
 											</p>
 											{#if isWalletCreating || walletFlowState}
 												<div class="border-buff my-4 space-y-2 rounded-lg border p-4">
@@ -769,14 +901,14 @@
 														Wallet Created Successfully!
 													</p>
 													<p class="text-xs text-[var(--color-moss-green)]/80">
-														Your new Hominio Wallet Address:
+														Your new Wallet Address:
 													</p>
 													<p class="font-mono text-sm break-all text-[var(--color-prussian-blue)]">
 														{newPkpEthAddress}
 													</p>
 													<p class="mt-2 text-xs text-slate-500">
 														It might take a moment for this page to fully reflect the new wallet
-														status. You can try refreshing.
+														status. You can try refreshing or changing tabs.
 													</p>
 												</div>
 											{/if}
@@ -789,7 +921,7 @@
 													{#if isWalletCreating}
 														Processing...
 													{:else}
-														Create Hominio Wallet
+														Create Wallet
 													{/if}
 												</button>
 											{/if}
@@ -803,7 +935,7 @@
 									<div class="pt-1">
 										{#if !hasHominioWallet}
 											<p class="text-prussian-blue/70 text-sm">
-												Please set up your Hominio Wallet to view authorized methods.
+												Please set up your Wallet to view authorized methods.
 											</p>
 										{:else if isLoadingWalletDetails}
 											<div class="flex items-center justify-start p-4">
@@ -876,7 +1008,7 @@
 									<div class="pt-1">
 										{#if !hasHominioWallet}
 											<p class="text-prussian-blue/70 text-sm">
-												Please set up your Hominio Wallet to view capacity credits.
+												Please set up your Wallet to view capacity credits.
 											</p>
 										{:else if isLoadingWalletDetails}
 											<div class="flex items-center justify-start p-4">
@@ -918,57 +1050,6 @@
 								</div>
 							{/if}
 
-							{#if activeTab === 'tokenBalance'}
-								<div class="bg-background-surface rounded-xl p-6 shadow-xs">
-									<div class="pt-1">
-										{#if !hasHominioWallet}
-											<p class="text-prussian-blue/70 text-sm">
-												Please set up your Hominio Wallet to view your token balance.
-											</p>
-										{:else if isLoadingSahelBalance}
-											<div class="flex items-center justify-start p-4">
-												<div class="spinner text-prussian-blue/80 mr-3 h-5 w-5"></div>
-												<p class="text-prussian-blue/80 text-sm">Loading SAHEL token balance...</p>
-											</div>
-										{:else if sahelBalanceError}
-											<div class="rounded-md bg-red-50 p-3">
-												<p class="text-sm text-red-700">
-													<span class="font-medium">Error:</span>
-													{sahelBalanceError}
-												</p>
-											</div>
-										{:else if sahelTokenBalance !== null}
-											<div class="space-y-2">
-												<p class="text-prussian-blue/90 text-lg">Your SAHEL Token Balance:</p>
-												<p class="text-persian-orange text-3xl font-semibold">
-													{sahelTokenBalance} SAHEL
-												</p>
-												<p class="text-prussian-blue/70 text-xs">
-													On Gnosis Chain for address: <span class="font-mono break-all"
-														>{currentPkpData?.pkpEthAddress}</span
-													>
-												</p>
-												<button
-													onclick={fetchSahelBalance}
-													disabled={isLoadingSahelBalance}
-													class="focus:ring-persian-orange/70 hover:bg-opacity-90 mt-4 rounded-lg bg-slate-200 px-4 py-2 text-xs font-medium text-slate-700 shadow-sm transition-colors focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-												>
-													{#if isLoadingSahelBalance}
-														<span class="spinner-tiny mr-1.5"></span>Refreshing...
-													{:else}
-														Refresh Balance
-													{/if}
-												</button>
-											</div>
-										{:else}
-											<p class="text-prussian-blue/70 text-sm">
-												Could not retrieve SAHEL token balance. Try refreshing.
-											</p>
-										{/if}
-									</div>
-								</div>
-							{/if}
-
 							{#if activeTab === 'testSigner'}
 								<div class="bg-timberwolf-1/40 rounded-lg p-6 shadow">
 									<h3 class="font-playfair-display text-prussian-blue mb-6 text-2xl">
@@ -978,8 +1059,8 @@
 									{#if !currentPkpData?.pkpEthAddress}
 										<div class="mb-6 rounded-md border border-orange-300 bg-orange-50 p-4">
 											<p class="text-sm text-orange-700">
-												A Hominio Wallet (PKP) is required to test signing features. Please create
-												or ensure your wallet is set up.
+												A Wallet (PKP) is required to test signing features. Please create or ensure
+												your wallet is set up.
 											</p>
 										</div>
 									{/if}
@@ -1126,7 +1207,7 @@
 								</div>
 							{/if}
 
-							{#if activeTab === 'billingPortal'}
+							{#if activeTab === 'billingSubscriptions'}
 								<div class="bg-background-surface rounded-xl p-6 shadow-xs">
 									<div class="space-y-8 pt-1">
 										<section>
@@ -1153,7 +1234,7 @@
 											</h3>
 											<p class="text-prussian-blue/80 mb-2 text-sm">
 												Standard Plan (Product ID: ...{currentPkpData?.pkpEthAddress
-													? 'b805...b1c7'
+													? 'b805...b1c7' // This is a placeholder, actual ID is in auth.ts
 													: 'N/A'} )
 											</p>
 											<p class="text-prussian-blue/70 mb-6 text-xs">

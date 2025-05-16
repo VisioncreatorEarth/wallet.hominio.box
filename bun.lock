@@ -3,10 +3,6 @@
   "workspaces": {
     "": {
       "name": "hominio-box-monorepo",
-      "dependencies": {
-        "@polar-sh/better-auth": "^1.0.0",
-        "@polar-sh/sdk": "^0.32.15",
-      },
       "devDependencies": {
         "@eslint/compat": "^1.2.9",
         "@eslint/js": "^9.26.0",
@@ -27,6 +23,8 @@
       "version": "0.0.1",
       "dependencies": {
         "@lit-protocol/lit-node-client": "^7.1.1",
+        "@polar-sh/better-auth": "^1.0.0",
+        "@polar-sh/sdk": "^0.32.15",
         "better-auth": "^1.2.7",
         "ipfs-only-hash": "^4.0.0",
         "pg": "^8.16.0",
@@ -36,7 +34,6 @@
         "@eslint/compat": "^1.2.5",
         "@eslint/js": "^9.18.0",
         "@flydotio/dockerfile": "^0.7.10",
-        "@sveltejs/adapter-auto": "^6.0.0",
         "@sveltejs/adapter-node": "^5.2.12",
         "@sveltejs/kit": "^2.16.0",
         "@sveltejs/vite-plugin-svelte": "^5.0.0",
@@ -457,8 +454,6 @@
     "@stablelib/x25519": ["@stablelib/x25519@1.0.3", "", { "dependencies": { "@stablelib/keyagreement": "^1.0.1", "@stablelib/random": "^1.0.2", "@stablelib/wipe": "^1.0.1" } }, "sha512-KnTbKmUhPhHavzobclVJQG5kuivH+qDLpe84iRqX3CLrKp881cF160JvXJ+hjn1aMyCwYOKeIZefIH/P5cJoRw=="],
 
     "@sveltejs/acorn-typescript": ["@sveltejs/acorn-typescript@1.0.5", "", { "peerDependencies": { "acorn": "^8.9.0" } }, "sha512-IwQk4yfwLdibDlrXVE04jTZYlLnwsTT2PIOQQGNLWfjavGifnk1JD1LcZjZaBTRcxZu2FfPfNLOE04DSu9lqtQ=="],
-
-    "@sveltejs/adapter-auto": ["@sveltejs/adapter-auto@6.0.1", "", { "peerDependencies": { "@sveltejs/kit": "^2.0.0" } }, "sha512-mcWud3pYGPWM2Pphdj8G9Qiq24nZ8L4LB7coCUckUEy5Y7wOWGJ/enaZ4AtJTcSm5dNK1rIkBRoqt+ae4zlxcQ=="],
 
     "@sveltejs/adapter-node": ["@sveltejs/adapter-node@5.2.12", "", { "dependencies": { "@rollup/plugin-commonjs": "^28.0.1", "@rollup/plugin-json": "^6.1.0", "@rollup/plugin-node-resolve": "^16.0.0", "rollup": "^4.9.5" }, "peerDependencies": { "@sveltejs/kit": "^2.4.0" } }, "sha512-0bp4Yb3jKIEcZWVcJC/L1xXp9zzJS4hDwfb4VITAkfT4OVdkspSHsx7YhqJDbb2hgLl6R9Vs7VQR+fqIVOxPUQ=="],
 
