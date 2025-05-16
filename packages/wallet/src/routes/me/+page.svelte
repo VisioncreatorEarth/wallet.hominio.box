@@ -13,26 +13,38 @@
 	import {
 		viemWalletClientStore,
 		connectedAccountStore,
-		walletConnectionErrorStore
+		walletConnectionErrorStore,
+		viemPublicClientStore
 	} from '$lib/stores/walletStore';
-	import { createWalletClient, custom, type WalletClient, type Address, type Hex } from 'viem';
+	import {
+		createWalletClient,
+		custom,
+		type WalletClient,
+		type Address,
+		type Hex,
+		type PublicClient,
+		type TransactionSerializableEIP1559,
+		encodeFunctionData,
+		parseUnits,
+		isAddress,
+		getAddress
+	} from 'viem';
 	import { gnosis } from 'viem/chains';
 	import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
 	import { browser } from '$app/environment';
 	import { getContext, onMount } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import { goto } from '$app/navigation';
+	import { erc20Abi } from 'viem';
 
-	// NEW: Import SignMessage component and signing service
-	// import SignMessage from '$lib/components/SignMessage.svelte';
-	// import { signMessageWithPkp } from '$lib/wallet/services/litSigningService';
-
-	// Get modal control functions from context
 	const openSignMessageModalFromLayout =
 		getContext<(message?: string) => void>('openSignMessageModal');
 	const openExecuteLitActionModalFromLayout = getContext<
 		(cid?: string, jsParams?: Record<string, unknown>) => void
 	>('openExecuteLitActionModal');
+	const openSignTransactionModalFromLayout = getContext<
+		(transaction: TransactionSerializableEIP1559, displayInfo?: { description: string }) => void
+	>('openSignTransactionModal');
 
 	interface MobileMenuStore {
 		isOpen: boolean;
@@ -60,36 +72,39 @@
 		return key.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase());
 	}
 
-	// Wallet Creation State
 	let walletFlowState = $state<WalletSetupState | null>(null);
 	let isWalletCreating = $state(false);
 	let newPkpEthAddress = $state<Address | null>(null);
 	let walletCreationError = $state<string | null>(null);
 
-	// Reactive EOA wallet stores
 	let eoaWalletClient = $state<WalletClient | null>(null);
 	let eoaAccountAddress = $state<Address | null>(null);
-
-	// EOA Connection error store (shadows the imported store for local usage in template)
 	let eoaConnectionError = $state<string | null>(null);
 
-	// State for wallet details (capacity credits and auth methods)
+	let publicClient = $state<PublicClient | null>(null);
+
 	let ownedCapacityCredits = $state<CapacityCredit[] | null>(null);
 	let permittedAuthMethods = $state<PermittedAuthMethod[] | null>(null);
 	let isLoadingWalletDetails = $state(false);
 	let walletDetailsError = $state<string | null>(null);
 
-	// State for dynamic inputs for Test Signer
 	let customMessageText = $state('');
-	let customLitActionCidText = $state('local:example-42.js'); // Default to example CID
+	let customLitActionCidText = $state('local:example-42.js');
 	let customJsParamsText = $state(JSON.stringify({ magicNumber: 42 }, null, 2));
 
 	const jsParamsPlaceholderString = '{"key": "value"}';
+
+	let isTestTransactionSigning = $state(false);
+	let testTransactionError = $state<string | null>(null);
+
+	let sahelRecipientAddressInput = $state<string>('0xCafe0f9a93A545d19613A945DbD5284486D4A2Ad');
+	let sahelAmountInput = $state<string>('0.01');
 
 	$effect(() => {
 		eoaWalletClient = $viemWalletClientStore;
 		eoaAccountAddress = $connectedAccountStore as Address | null;
 		eoaConnectionError = $walletConnectionErrorStore;
+		publicClient = $viemPublicClientStore;
 	});
 
 	let currentPkpData = $derived(
@@ -132,8 +147,6 @@
 		}
 		fetchDetails();
 	});
-
-	// REMOVED: Handlers for SignMessage component events (handleSignRequest, handleClearSignature)
 
 	async function connectMetaMask() {
 		walletConnectionErrorStore.set(null);
@@ -284,9 +297,106 @@
 			mobileMenuStore.update((s) => ({ ...s, activeLabel: initialTab.label }));
 		}
 	});
+
+	function handleInitiateSignMessage() {
+		const message = customMessageText.trim() || undefined;
+		openSignMessageModalFromLayout(message);
+	}
+
+	function handleInitiateLitAction() {
+		const cid = customLitActionCidText.trim() || undefined;
+		let jsParams: Record<string, unknown> | undefined = undefined;
+		try {
+			if (customJsParamsText.trim()) {
+				jsParams = JSON.parse(customJsParamsText.trim());
+			}
+		} catch (e) {
+			alert('Invalid JSON in JS Params. Please correct it or leave it empty for default.');
+			return;
+		}
+		openExecuteLitActionModalFromLayout(cid, jsParams);
+	}
+
+	async function handleInitiateSahelTokenTransferSigning() {
+		if (!publicClient || !currentPkpData?.pkpEthAddress) {
+			testTransactionError = 'Public client or PKP ETH address not available.';
+			return;
+		}
+
+		const recipientString = sahelRecipientAddressInput.trim();
+		if (!recipientString || !isAddress(recipientString)) {
+			testTransactionError = 'Invalid recipient address. Please enter a valid Ethereum address.';
+			return;
+		}
+		const recipientAddress: Address = getAddress(recipientString);
+
+		const amountString = sahelAmountInput.trim();
+		if (!amountString || isNaN(parseFloat(amountString)) || parseFloat(amountString) <= 0) {
+			testTransactionError = 'Invalid amount. Please enter a positive number.';
+			return;
+		}
+
+		isTestTransactionSigning = true;
+		testTransactionError = null;
+
+		try {
+			const pkpEthAddress = currentPkpData.pkpEthAddress as Address;
+			const SAHEL_TOKEN_ADDRESS_RAW = '0x181CA58494Fc2C75FF805DEAA32ecD78377e135e';
+			const SAHEL_TOKEN_ADDRESS: Address = getAddress(SAHEL_TOKEN_ADDRESS_RAW);
+
+			const amountToSend = parseUnits(amountString, 18);
+
+			const nonce = await publicClient.getTransactionCount({
+				address: pkpEthAddress,
+				blockTag: 'pending'
+			});
+
+			const { maxFeePerGas, maxPriorityFeePerGas } = await publicClient.estimateFeesPerGas();
+			if (!maxFeePerGas || !maxPriorityFeePerGas) {
+				throw new Error(
+					'Could not estimate gas fees (maxFeePerGas or maxPriorityFeePerGas is null).'
+				);
+			}
+
+			const encodedTransferData = encodeFunctionData({
+				abi: erc20Abi,
+				functionName: 'transfer',
+				args: [recipientAddress, amountToSend]
+			});
+
+			const gas = await publicClient.estimateGas({
+				account: pkpEthAddress,
+				to: SAHEL_TOKEN_ADDRESS,
+				data: encodedTransferData,
+				value: 0n
+			});
+
+			const unsignedTx: TransactionSerializableEIP1559 = {
+				to: SAHEL_TOKEN_ADDRESS,
+				data: encodedTransferData,
+				nonce: nonce,
+				gas: gas,
+				maxFeePerGas: maxFeePerGas,
+				maxPriorityFeePerGas: maxPriorityFeePerGas,
+				chainId: gnosis.id,
+				type: 'eip1559',
+				value: 0n
+			};
+
+			console.log('Unsigned Transaction Prepared:', unsignedTx);
+
+			openSignTransactionModalFromLayout(unsignedTx, {
+				description: `Transfer ${amountString} SAHEL to ${recipientAddress.slice(0, 6)}...${recipientAddress.slice(-4)}`
+			});
+		} catch (err: any) {
+			console.error('Error preparing Sahel token transfer:', err);
+			testTransactionError = `Failed to prepare transaction: ${err.message || 'Unknown error'}`;
+		} finally {
+			isTestTransactionSigning = false;
+		}
+	}
 </script>
 
-<!-- Outermost container: full height, base styling, NO PADDING/MARGIN -->
 <div class="bg-background-app font-ibm-plex-sans text-prussian-blue h-full">
 	{#if $session.data?.user}
 		{@const allData = $session.data as any}
@@ -294,9 +404,7 @@
 		{@const sessionInfo = allData.session}
 		{@const pkpPasskeyData = currentPkpData}
 
-		<!-- Top-level flex container for aside and main content area -->
 		<div class="flex h-full">
-			<!-- ASIDE: Fixed width on desktop, full height, manages its own padding. Responsive positioning for mobile. -->
 			<aside
 				class="bg-background-app fixed top-16 bottom-0 left-0 z-30 w-72 transform p-4 pt-8 shadow-xl transition-transform duration-300 ease-in-out {$mobileMenuStore.isOpen
 					? 'translate-x-0'
@@ -337,20 +445,13 @@
 				</nav>
 			</aside>
 
-			<!-- MAIN CONTENT WRAPPER: Takes remaining space -->
 			<div class="min-w-0 flex-1">
-				<!-- Centering and max-width container for main content -->
 				<div class="mx-auto flex h-full max-w-5xl flex-col">
-					<!-- MOVED: Header for main content section (tab label) is now INSIDE the main scrollable content -->
-
-					<!-- Flex container for the scrollable main area - THIS DIV IS NOW THE SCROLL CONTAINER (NO PADDING) -->
 					<div
 						class="relative flex min-h-0 flex-grow flex-col overflow-y-auto"
 						style="-webkit-overflow-scrolling: touch;"
 					>
-						<!-- Main content area: PADDING APPLIED HERE, esp. pb-32. Header and cards are children. -->
 						<main class="min-h-0 w-full flex-1 space-y-6 p-4 pt-8 md:p-6">
-							<!-- Header for main content section (tab label) - MOVED HERE -->
 							<header class="mb-6 text-center md:mb-8 md:text-left">
 								<h1
 									class="font-playfair-display text-prussian-blue text-3xl font-normal md:text-4xl"
@@ -731,115 +832,159 @@
 							{/if}
 
 							{#if activeTab === 'testSigner'}
-								<div class="bg-background-surface rounded-xl p-6 shadow-xs">
-									<h4 class="text-prussian-blue mb-4 text-lg font-semibold">Test Signer Actions</h4>
-									{#if hasHominioWallet}
-										<div class="space-y-3">
-											<!-- Inputs for Custom Message Signing -->
-											<div class="border-timberwolf-2/30 my-4 space-y-2 border-t border-b py-4">
-												<div>
-													<label
-														for="customMessageToSign"
-														class="text-prussian-blue/80 mb-1 block text-xs font-medium"
-														>Custom Message to Sign:</label
-													>
-													<textarea
-														id="customMessageToSign"
-														rows="3"
-														bind:value={customMessageText}
-														placeholder="Enter message to sign..."
-														class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 text-xs shadow-sm sm:text-sm"
-													></textarea>
-												</div>
+								<div class="bg-timberwolf-1/40 rounded-lg p-6 shadow">
+									<h3 class="font-playfair-display text-prussian-blue mb-6 text-2xl">
+										Test Signer Functionality
+									</h3>
+
+									{#if !currentPkpData?.pkpEthAddress}
+										<div class="mb-6 rounded-md border border-orange-300 bg-orange-50 p-4">
+											<p class="text-sm text-orange-700">
+												A Hominio Wallet (PKP) is required to test signing features. Please create
+												or ensure your wallet is set up.
+											</p>
+										</div>
+									{/if}
+
+									<div class="space-y-8">
+										<!-- Section for Sign Message -->
+										<section>
+											<h4 class="text-prussian-blue/90 mb-3 text-lg font-semibold">
+												1. Sign a Custom Message
+											</h4>
+											<div class="mb-4">
+												<label
+													for="customMessageInput"
+													class="text-prussian-blue/80 mb-1 block text-sm font-medium"
+													>Message to Sign:</label
+												>
+												<textarea
+													id="customMessageInput"
+													rows="3"
+													class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 shadow-sm disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500 disabled:shadow-none sm:text-sm"
+													placeholder="Enter your custom message here, or leave blank for default."
+													bind:value={customMessageText}
+													disabled={!currentPkpData?.pkpEthAddress}
+												></textarea>
 											</div>
 											<button
-												onclick={() => {
-													const messageToSign = customMessageText.trim();
-													if (!messageToSign) {
-														// Optionally, open modal with default message if input is empty, or navigate with no message param
-														goto('/me?actionType=signMessage'); // Triggers default message in layout
-														// openSignMessageModalFromLayout?.(); // Alternative: direct call for default
-														return;
-													}
-													const params = new URLSearchParams();
-													params.set('actionType', 'signMessage');
-													params.set('message', messageToSign); // No need to encode if using URLSearchParams
-													goto(`/me?${params.toString()}`);
-												}}
-												class="mt-2 w-full rounded-lg bg-[var(--color-prussian-blue)] px-5 py-2.5 text-sm font-medium text-[var(--color-linen)] transition-colors hover:brightness-90 focus:ring-2 focus:ring-[var(--color-persian-orange)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+												onclick={handleInitiateSignMessage}
+												disabled={!currentPkpData?.pkpEthAddress}
+												class="bg-persian-orange text-linen focus:ring-persian-orange/70 hover:bg-opacity-90 rounded-lg px-5 py-2.5 text-sm font-medium shadow-md transition-colors focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-400"
 											>
-												Sign Custom Message
+												Initiate Sign Message
 											</button>
+										</section>
 
-											<!-- Inputs for Custom Lit Action -->
-											<div class="border-timberwolf-2/30 my-4 space-y-2 border-t border-b py-4">
+										<!-- Section for Execute Lit Action -->
+										<section>
+											<h4 class="text-prussian-blue/90 mb-3 text-lg font-semibold">
+												2. Execute a Lit Action
+											</h4>
+											<div class="mb-4">
+												<label
+													for="customLitActionCid"
+													class="text-prussian-blue/80 mb-1 block text-sm font-medium"
+													>Lit Action CID (or local path):</label
+												>
+												<input
+													type="text"
+													id="customLitActionCid"
+													class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 shadow-sm disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500 disabled:shadow-none sm:text-sm"
+													placeholder="Enter Lit Action IPFS CID or 'local:action-name.js'"
+													bind:value={customLitActionCidText}
+													disabled={!currentPkpData?.pkpEthAddress}
+												/>
+											</div>
+											<div class="mb-4">
+												<label
+													for="customJsParams"
+													class="text-prussian-blue/80 mb-1 block text-sm font-medium"
+													>JS Params (JSON format):</label
+												>
+												<textarea
+													id="customJsParams"
+													rows="4"
+													class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 font-mono text-xs shadow-sm disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500 disabled:shadow-none sm:text-sm"
+													placeholder={jsParamsPlaceholderString}
+													bind:value={customJsParamsText}
+													disabled={!currentPkpData?.pkpEthAddress}
+												></textarea>
+											</div>
+											<button
+												onclick={handleInitiateLitAction}
+												disabled={!currentPkpData?.pkpEthAddress}
+												class="bg-persian-orange text-linen focus:ring-persian-orange/70 hover:bg-opacity-90 rounded-lg px-5 py-2.5 text-sm font-medium shadow-md transition-colors focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-400"
+											>
+												Initiate Lit Action Execution
+											</button>
+										</section>
+
+										<!-- Section for Sign Transaction -->
+										<section>
+											<h4 class="text-prussian-blue/90 mb-3 text-lg font-semibold">
+												3. Sign a Transaction (Sahel Token Transfer)
+											</h4>
+											<p class="text-prussian-blue/70 mb-3 text-xs">
+												This will prepare a transaction to transfer SAHEL token on Gnosis chain and
+												request your PKP to sign it.
+											</p>
+
+											<div class="mb-4 space-y-3">
 												<div>
 													<label
-														for="customLitActionCid"
-														class="text-prussian-blue/80 mb-1 block text-xs font-medium"
-														>Custom Lit Action CID:</label
+														for="sahelRecipientAddress"
+														class="text-prussian-blue/80 mb-1 block text-sm font-medium"
+														>Recipient Address:</label
 													>
 													<input
-														id="customLitActionCid"
+														id="sahelRecipientAddress"
 														type="text"
-														bind:value={customLitActionCidText}
-														placeholder="Enter Lit Action CID (e.g., local:example-42.js)"
-														class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 text-xs shadow-sm sm:text-sm"
+														class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 shadow-sm disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500 disabled:shadow-none sm:text-sm"
+														placeholder="0x..."
+														bind:value={sahelRecipientAddressInput}
+														disabled={!currentPkpData?.pkpEthAddress || isTestTransactionSigning}
 													/>
 												</div>
 												<div>
 													<label
-														for="customJsParams"
-														class="text-prussian-blue/80 mb-1 block text-xs font-medium"
-														>Custom JS Params (JSON):</label
+														for="sahelAmount"
+														class="text-prussian-blue/80 mb-1 block text-sm font-medium"
+														>Amount (SAHEL):</label
 													>
-													<textarea
-														id="customJsParams"
-														rows="3"
-														bind:value={customJsParamsText}
-														placeholder={jsParamsPlaceholderString}
-														class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 font-mono text-xs shadow-sm sm:text-sm"
-													></textarea>
+													<input
+														id="sahelAmount"
+														type="text"
+														inputmode="decimal"
+														pattern="^[0-9]*[.,]?[0-9]*$"
+														class="border-timberwolf-2/50 focus:border-persian-orange focus:ring-persian-orange block w-full rounded-md bg-white p-2 shadow-sm disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500 disabled:shadow-none sm:text-sm"
+														placeholder="0.01"
+														bind:value={sahelAmountInput}
+														disabled={!currentPkpData?.pkpEthAddress || isTestTransactionSigning}
+													/>
 												</div>
 											</div>
 
 											<button
-												onclick={() => {
-													let parsedJsParams = {};
-													try {
-														parsedJsParams = customJsParamsText.trim()
-															? JSON.parse(customJsParamsText)
-															: {};
-													} catch (e) {
-														alert('Invalid JSON in JS Params. Please correct it.');
-														return;
-													}
-													const cidToExecute = customLitActionCidText.trim();
-													if (!cidToExecute) {
-														// Navigate with no CID to trigger default CID in layout, or handle as error
-														goto(
-															`/me?actionType=executeLitAction&jsParams=${encodeURIComponent(JSON.stringify(parsedJsParams))}`
-														);
-														return;
-													}
-													const params = new URLSearchParams();
-													params.set('actionType', 'executeLitAction');
-													params.set('cid', cidToExecute);
-													if (Object.keys(parsedJsParams).length > 0) {
-														params.set('jsParams', JSON.stringify(parsedJsParams));
-													}
-													goto(`/me?${params.toString()}`);
-												}}
-												class="mt-2 w-full rounded-lg bg-[var(--color-prussian-blue)] px-5 py-2.5 text-sm font-medium text-[var(--color-linen)] transition-colors hover:brightness-90 focus:ring-2 focus:ring-[var(--color-persian-orange)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+												onclick={handleInitiateSahelTokenTransferSigning}
+												disabled={!currentPkpData?.pkpEthAddress ||
+													!publicClient ||
+													isTestTransactionSigning ||
+													!sahelRecipientAddressInput.trim() ||
+													isTestTransactionSigning}
+												class="bg-persian-orange text-linen focus:ring-persian-orange/70 hover:bg-opacity-90 rounded-lg px-5 py-2.5 text-sm font-medium shadow-md transition-colors focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-400"
 											>
-												Execute Lit Action by CID
+												{#if isTestTransactionSigning}
+													<span class="spinner-tiny mr-2"></span> Preparing Transaction...
+												{:else}
+													Initiate Sahel Token Transfer Signing
+												{/if}
 											</button>
-										</div>
-									{:else}
-										<p class="text-prussian-blue/70 text-sm">
-											Please set up your Hominio Wallet to use the Test Signer.
-										</p>
-									{/if}
+											{#if testTransactionError}
+												<p class="mt-3 text-xs text-red-600">Error: {testTransactionError}</p>
+											{/if}
+										</section>
+									</div>
 								</div>
 							{/if}
 
@@ -860,7 +1005,6 @@
 			</div>
 		</div>
 	{:else}
-		<!-- Fallback for when user is not signed in -->
 		<div class="py-16 text-center">
 			<h1 class="font-playfair-display text-prussian-blue mb-6 text-4xl font-normal md:text-5xl">
 				Access Denied

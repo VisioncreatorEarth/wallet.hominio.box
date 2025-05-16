@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { Hex, Address } from 'viem'; // Address might not be needed directly in UI component
+	import type { Hex, Address, Signature as ViemSignature, TransactionSerializable } from 'viem'; // Added formatUnits
+	import { formatUnits } from 'viem'; // ADD as value import
 	// import { createEventDispatcher } from 'svelte'; // REMOVED
 	import type { ExecuteJsResponse } from '@lit-protocol/types';
 	import { example42LitActionCode } from '../wallet/lit-actions/example-42';
@@ -9,11 +10,14 @@
 		ActionType, // Keep for clarity if needed, though actionRequest.type is primary
 		SignMessageActionParams,
 		ExecuteLitActionParams,
+		SignTransactionActionParams, // Added
 		RequestActionDetail,
 		ActionResultDetail,
 		SimplifiedSignMessageUiParams,
 		SimplifiedExecuteLitActionUiParams,
-		ExecuteEventDetail
+		SimplifiedSignTransactionUiParams, // Added
+		ExecuteEventDetail,
+		SignTransactionActionResultDetail // Explicitly import for checking type
 	} from '../wallet/actionTypes';
 
 	// Props using Svelte 5 runes syntax
@@ -98,6 +102,10 @@
 					fetchCodeError = 'Lit Action CID is missing in the request.';
 					isFetchingCode = false; // Ensure this is false if no CID
 				}
+			} else if (currentActionReq.type === 'signTransaction') {
+				// Added
+				// No specific input fields for transaction; data comes from actionRequest.params.transaction
+				// Display info will also come from actionRequest.params.transactionDisplayInfo
 			}
 		} else {
 			// If actionRequest becomes null, reset all fields
@@ -145,6 +153,13 @@
 				jsParams: jsParamsParsed
 			};
 			eventDetail = { type: 'executeLitAction', uiParams };
+		} else if (actionRequest.type === 'signTransaction') {
+			// Added
+			const params = actionRequest.params as SignTransactionActionParams;
+			const uiParams: SimplifiedSignTransactionUiParams = {
+				transaction: params.transaction
+			};
+			eventDetail = { type: 'signTransaction', uiParams };
 		} else {
 			alert('Invalid action type in request.');
 			return;
@@ -181,14 +196,51 @@
 	const currentLitActionResult = $derived(
 		processResult?.type === 'executeLitAction' ? processResult.result : null
 	);
-
-	const showResultView = $derived(
-		!!currentSignMessageResult || !!currentLitActionResult || !!currentErrorMessage
+	const currentSignTransactionResult = $derived(
+		processResult?.type === 'signTransaction' ? processResult.signature : null
+	);
+	const currentTransactionSendHash = $derived(
+		// Added for transaction hash
+		processResult?.type === 'signTransaction' &&
+			(processResult as SignTransactionActionResultDetail).transactionHash
+			? (processResult as SignTransactionActionResultDetail).transactionHash
+			: null
 	);
 
-	const isSuccessResult = $derived(!!currentSignMessageResult || !!currentLitActionResult);
+	// ADDED: Derived state for transaction receipt status
+	const currentTransactionReceipt = $derived(
+		processResult?.type === 'signTransaction'
+			? (processResult as SignTransactionActionResultDetail).transactionReceipt
+			: null
+	);
 
-	const isErrorState = $derived(!!currentErrorMessage);
+	const transactionStatus = $derived(() => {
+		if (!currentTransactionReceipt) return null;
+		return currentTransactionReceipt.status === 'success'
+			? 'Confirmed (Success)'
+			: 'Failed (Reverted on-chain)';
+	});
+
+	const showResultView = $derived(
+		!!currentSignMessageResult ||
+			!!currentLitActionResult ||
+			!!currentSignTransactionResult ||
+			!!currentTransactionSendHash || // Added
+			!!currentTransactionReceipt || // ADDED
+			!!currentErrorMessage
+	);
+
+	const isSuccessResult = $derived(
+		(!!currentSignMessageResult ||
+			!!currentLitActionResult ||
+			!!currentSignTransactionResult ||
+			!!currentTransactionSendHash) && // Keep this group for initial success indication
+			(!currentTransactionReceipt || currentTransactionReceipt.status === 'success') // AND (if receipt exists, it must be success)
+	);
+
+	const isErrorState = $derived(
+		!!currentErrorMessage || currentTransactionReceipt?.status === 'reverted'
+	);
 </script>
 
 <div class="w-full">
@@ -285,6 +337,108 @@
 				></textarea>
 			</div>
 		{/if}
+
+		<!-- Sign Transaction Section -->
+		{#if actionRequest?.type === 'signTransaction'}
+			{@const txParams = actionRequest.params as SignTransactionActionParams}
+			{@const displayInfo = txParams.transactionDisplayInfo}
+			{@const rawTx = txParams.transaction}
+			<div class="mb-4 space-y-3">
+				<div>
+					<h4 class="text-prussian-blue mb-2 text-base font-semibold">Transaction Details:</h4>
+
+					{#if displayInfo?.description}
+						<p class="text-prussian-blue/90 mb-3 text-sm">{displayInfo.description}</p>
+					{/if}
+
+					<div class="space-y-1.5 text-xs">
+						<div class="flex justify-between">
+							<span class="text-prussian-blue/70">From (Your PKP):</span>
+							<span class="text-prussian-blue font-mono break-all">{txParams.pkpPublicKey}</span>
+						</div>
+
+						<!-- To / Recipient Logic -->
+						{#if displayInfo?.recipient}
+							<div class="flex justify-between">
+								<span class="text-prussian-blue/70">To (Recipient):</span>
+								<span class="text-prussian-blue font-mono break-all">
+									{displayInfo.recipient}
+								</span>
+							</div>
+							{#if rawTx.to && rawTx.to.toLowerCase() !== displayInfo.recipient.toLowerCase()}
+								<div class="flex justify-between">
+									<span class="text-prussian-blue/70">Interacting With (Contract):</span>
+									<span class="text-prussian-blue font-mono break-all">
+										{rawTx.to}
+									</span>
+								</div>
+							{/if}
+						{:else if rawTx.to}
+							<div class="flex justify-between">
+								<span class="text-prussian-blue/70">To:</span>
+								<span class="text-prussian-blue font-mono break-all">
+									{rawTx.to}
+								</span>
+							</div>
+						{/if}
+
+						<!-- Amount Logic -->
+						{#if displayInfo?.amount && displayInfo?.tokenSymbol}
+							<div class="flex justify-between">
+								<span class="text-prussian-blue/70">Amount:</span>
+								<span class="text-prussian-blue font-mono">
+									{displayInfo.amount}
+									{displayInfo.tokenSymbol}
+								</span>
+							</div>
+							{#if typeof rawTx.value === 'bigint' && rawTx.value > 0n}
+								<div class="flex justify-between">
+									<span class="text-prussian-blue/70">Value (ETH Sent Alongside):</span>
+									<span class="text-prussian-blue font-mono">
+										{formatUnits(rawTx.value, 18)} ETH
+									</span>
+								</div>
+							{/if}
+						{:else if typeof rawTx.value === 'bigint'}
+							<div class="flex justify-between">
+								<span class="text-prussian-blue/70">Amount:</span>
+								<span class="text-prussian-blue font-mono">
+									{rawTx.value > 0n ? `${formatUnits(rawTx.value, 18)} ETH` : '0 ETH'}
+								</span>
+							</div>
+						{/if}
+
+						{#if rawTx.gas}
+							<div class="flex justify-between">
+								<span class="text-prussian-blue/70">Estimated Gas Limit:</span>
+								<span class="text-prussian-blue font-mono">{rawTx.gas.toString()}</span>
+							</div>
+						{/if}
+						{#if rawTx.nonce !== undefined}
+							<div class="flex justify-between">
+								<span class="text-prussian-blue/70">Nonce:</span>
+								<span class="text-prussian-blue font-mono">{rawTx.nonce.toString()}</span>
+							</div>
+						{/if}
+					</div>
+
+					{#if !displayInfo?.description}
+						<!-- Show raw if no custom description -->
+						<details class="mt-3 text-xs">
+							<summary class="text-prussian-blue/70 hover:text-prussian-blue cursor-pointer"
+								>Show Raw Transaction Data</summary
+							>
+							<pre
+								class="bg-timberwolf-1/40 text-prussian-blue/90 mt-1 w-full overflow-auto rounded-md p-2.5 text-[0.7rem] leading-snug">{JSON.stringify(
+									rawTx,
+									(key, value) => (typeof value === 'bigint' ? value.toString() + 'n' : value),
+									2
+								)}</pre>
+						</details>
+					{/if}
+				</div>
+			</div>
+		{/if}
 	{:else}
 		<!-- Result display section, ensure it has top margin if needed -->
 		{#if currentSignMessageResult}
@@ -304,6 +458,57 @@
 						null,
 						2
 					)}</pre>
+			</div>
+		{/if}
+
+		{#if currentSignTransactionResult}
+			<div class="mt-4">
+				<h4 class="text-prussian-blue text-sm font-medium">Transaction Signature:</h4>
+				<pre
+					class="bg-timberwolf-1/40 text-prussian-blue/90 mt-1 w-full overflow-auto rounded-md p-2 text-xs break-words whitespace-pre-wrap">{JSON.stringify(
+						currentSignTransactionResult,
+						(key, value) => (typeof value === 'bigint' ? value.toString() + 'n' : value),
+						2
+					)}</pre>
+			</div>
+		{/if}
+
+		{#if currentTransactionSendHash}
+			<div class="mt-4">
+				<h4 class="text-prussian-blue text-sm font-medium">Transaction Sent:</h4>
+				<p class="text-prussian-blue/80 mb-1 text-xs">
+					The transaction has been broadcast to the network.
+				</p>
+				<h5 class="text-prussian-blue/90 text-xs font-medium">Transaction Hash:</h5>
+				<pre
+					class="bg-timberwolf-1/40 text-prussian-blue/90 mt-1 w-full overflow-auto rounded-md p-2 text-xs break-words whitespace-pre-wrap">{currentTransactionSendHash}</pre>
+				<!-- Optional: Link to block explorer -->
+				<a
+					href={`https://gnosis.blockscout.com/tx/${currentTransactionSendHash}`}
+					target="_blank"
+					rel="noopener noreferrer"
+					class="text-persian-orange hover:text-persian-orange/80 mt-1 block text-xs underline"
+				>
+					View on Gnosis Blockscout
+				</a>
+			</div>
+		{/if}
+
+		{#if transactionStatus}
+			<div class="mt-4">
+				<h5 class="text-prussian-blue/90 text-sm font-medium">On-Chain Status:</h5>
+				<p
+					class="text-xs {currentTransactionReceipt?.status === 'success'
+						? 'text-green-600'
+						: 'text-red-600'}"
+				>
+					{transactionStatus}
+				</p>
+				{#if currentTransactionReceipt?.status === 'reverted' && currentTransactionReceipt.gasUsed}
+					<p class="text-xs text-red-500/80">
+						(Gas Used: {currentTransactionReceipt.gasUsed.toString()})
+					</p>
+				{/if}
 			</div>
 		{/if}
 
@@ -339,12 +544,16 @@
 					(actionRequest.type === 'signMessage' && !messageToSignInput.trim()) ||
 					(actionRequest.type === 'executeLitAction' &&
 						(!fetchedLitCode || !jsParamsInput.trim())) ||
+					(actionRequest.type === 'signTransaction' &&
+						!(actionRequest.params as SignTransactionActionParams).transaction) || // Basic check for transaction presence
 					isProcessing}
 				class="rounded-2xl px-4 py-2 text-sm font-medium transition-colors
 					   {!canProcess ||
 				!actionRequest ||
 				(actionRequest.type === 'signMessage' && !messageToSignInput.trim()) ||
 				(actionRequest.type === 'executeLitAction' && (!fetchedLitCode || !jsParamsInput.trim())) ||
+				(actionRequest.type === 'signTransaction' &&
+					!(actionRequest.params as SignTransactionActionParams).transaction) ||
 				isProcessing
 					? 'cursor-not-allowed bg-slate-300 text-slate-500'
 					: 'bg-prussian-blue text-linen hover:bg-opacity-90 focus:ring-persian-orange focus:ring-2 focus:outline-none'}"
@@ -355,6 +564,8 @@
 					Sign Message
 				{:else if actionRequest?.type === 'executeLitAction'}
 					Execute Action
+				{:else if actionRequest?.type === 'signTransaction'}
+					Sign Transaction
 				{:else}
 					Perform Action
 				{/if}

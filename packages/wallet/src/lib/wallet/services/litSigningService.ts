@@ -5,7 +5,7 @@ import { passkeyVerifierLitActionCode } from "../lit-actions/passkeyVerifier";
 // import { example42LitActionCode } from "../lit-actions/example-42";
 import { EIP_1271_MAGIC_VALUE, formatSignatureForEIP1271 } from './contractService';
 import { gnosis } from 'viem/chains';
-import { type Hex, type Address, hashMessage, toBytes, bytesToHex } from 'viem';
+import { type Hex, type Address, hashMessage, toBytes, bytesToHex, serializeTransaction, keccak256, type TransactionSerializable, type Signature as ViemSignature } from 'viem';
 import { publicKeyToAddress } from 'viem/utils'; // Added for deriving address
 import { Buffer } from 'buffer';
 // import * as ipfsOnlyHash from 'ipfs-only-hash'; // Removed as unused
@@ -18,7 +18,8 @@ import type {
     LitResourceAbilityRequest,
     AuthSig, // Added AuthSig type
     SessionSigsMap, // Added SessionSigsMap for clarity, though getPkpSessionSigs/getLitActionSessionSigs return it
-    ExecuteJsResponse // ADDED for executeLitActionWithPkp
+    ExecuteJsResponse, // ADDED for executeLitActionWithPkp
+    SigResponse // Import for pkpSign result
 } from '@lit-protocol/types';
 
 const LIT_WALLET_SIG_STORAGE_KEY = 'lit-wallet-sig'; // Key used by Lit SDK
@@ -169,7 +170,7 @@ async function _acquirePkpSessionSigs(
                         pkpPublicKey: pkpPublicKey,
                         authMethods: [{
                             authMethodType: 1, // AuthSig
-                            accessToken: storedAuthSigString,
+                            accessToken: storedAuthSigString as any,
                         }],
                         resourceAbilityRequests,
                         expiration: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24hr session
@@ -258,26 +259,119 @@ export async function signMessageWithPkp(
         const litNodeClient = await getLitClient(); // Ensure client is still accessible
         if (!litNodeClient.ready) return { error: "Lit Client became not ready before pkpSign." }
         try {
-            console.log('[litSigningService] Calling pkpSign with obtained SessionSigs...');
-            const pkpSignResult = await litNodeClient.pkpSign({
+            console.log('[litSigningService] Calling pkpSign with obtained SessionSigs for message...');
+            const pkpSignResult: SigResponse = await litNodeClient.pkpSign({
                 sessionSigs: sessionSigs,
-                toSign: digestToSign,
-                pubKey: pkpPublicKey, // Ensure this is the correct PKP's public key
+                toSign: digestToSign, // This is Uint8Array for message hash
+                pubKey: pkpPublicKey,
             });
 
-            console.log("[litSigningService] PKP Sign Result:", pkpSignResult);
-            if (!pkpSignResult || !pkpSignResult.signature) {
-                return { error: "Failed to sign message with PKP or signature missing." };
+            console.log("[litSigningService] PKP Sign Result (message):", pkpSignResult);
+            if (!pkpSignResult || !pkpSignResult.r || !pkpSignResult.s || pkpSignResult.recid === undefined) {
+                return { error: "Failed to sign message with PKP or signature components missing." };
             }
-            return { signature: pkpSignResult.signature as Hex };
+            // For a standard message signature, typically an EIP-191 signed message, the signature is usually concatenated r, s, v.
+            // The 'v' value (recid + 27) is common.
+            const r = `0x${pkpSignResult.r}`;
+            const s = `0x${pkpSignResult.s}`;
+            const v = (pkpSignResult.recid + 27).toString(16); // Convert v to hex
+            const combinedSignature = `${r}${s.substring(2)}${v.length === 1 ? '0' + v : v}` as Hex;
+
+            return { signature: combinedSignature };
         } catch (signError: unknown) {
-            console.error('[litSigningService] Error during final pkpSign call:', signError);
+            console.error('[litSigningService] Error during final pkpSign call (message):', signError);
             const message = signError instanceof Error ? signError.message : 'Unknown error during pkpSign.';
-            return { error: `Failed to sign: ${message}` };
+            return { error: `Failed to sign message: ${message}` };
         }
     } else {
         // This case should ideally be caught by checks within _acquirePkpSessionSigs
-        return { error: "Failed to obtain session signatures through any method (unexpected state)." };
+        return { error: "Failed to obtain session signatures for message signing (unexpected state)." };
+    }
+}
+
+/**
+ * Signs a transaction hash using the user's PKP.
+ * Acquires session signatures, then signs the hash of the serialized transaction.
+ */
+export async function signTransactionWithPkp(
+    transactionToSign: TransactionSerializable,
+    pkpTokenId: string, // Retained for context
+    pkpPublicKey: Hex,
+    passkeyRawId: Hex,
+    passkeyVerifierContractAddress: Address
+): Promise<{ signature: ViemSignature } | { error: string }> {
+    console.log('[litSigningService] signTransactionWithPkp called for transaction:', transactionToSign);
+
+    let serializedTx: Hex;
+    try {
+        serializedTx = serializeTransaction(transactionToSign);
+        console.log('[litSigningService] Serialized Transaction:', serializedTx);
+    } catch (serializeError: unknown) {
+        const message = serializeError instanceof Error ? serializeError.message : 'Unknown serialization error.';
+        console.error('[litSigningService] Error serializing transaction:', message);
+        return { error: `Failed to serialize transaction: ${message}` };
+    }
+
+    const digestToSign = toBytes(keccak256(serializedTx)); // Hash the serialized transaction
+    console.log('[litSigningService] Digest to sign (transaction hash):', bytesToHex(digestToSign));
+
+    const resourceAbilityRequests: LitResourceAbilityRequest[] = [
+        {
+            resource: new LitPKPResource('*'), // Or specific: new LitPKPResource(pkpTokenId)
+            ability: 'pkp-signing',
+        },
+    ];
+
+    const sessionSigsResult = await _acquirePkpSessionSigs(
+        pkpPublicKey,
+        passkeyRawId,
+        passkeyVerifierContractAddress,
+        resourceAbilityRequests
+    );
+
+    if ('error' in sessionSigsResult) {
+        return { error: sessionSigsResult.error };
+    }
+    const sessionSigs = sessionSigsResult;
+
+    if (sessionSigs) {
+        const litNodeClient = await getLitClient();
+        if (!litNodeClient.ready) return { error: "Lit Client became not ready before pkpSign for transaction." };
+        try {
+            console.log('[litSigningService] Calling pkpSign with obtained SessionSigs for transaction hash...');
+            const pkpSignResult: SigResponse = await litNodeClient.pkpSign({
+                sessionSigs: sessionSigs,
+                toSign: digestToSign, // This is Uint8Array of the transaction hash
+                pubKey: pkpPublicKey,
+            });
+
+            console.log("[litSigningService] PKP Sign Result (transaction):", pkpSignResult);
+
+            if (!pkpSignResult || !pkpSignResult.r || !pkpSignResult.s || pkpSignResult.recid === undefined) {
+                return { error: "Failed to sign transaction with PKP or signature components missing." };
+            }
+
+            // Convert Lit's SigResponse to Viem's Signature type
+            // recid is yParity (0 or 1).
+            const signature: ViemSignature = {
+                r: `0x${pkpSignResult.r}` as Hex,
+                s: `0x${pkpSignResult.s}` as Hex,
+                yParity: pkpSignResult.recid as 0 | 1,
+            };
+            // For EIP-1559 transactions, yParity is preferred over v.
+            // Some wallets/systems might still expect v. Viem's serializeTransaction & signTransaction handle this.
+            // Here we provide both for flexibility, but yParity is key for EIP-155.
+
+            console.log("[litSigningService] Formatted Viem Signature:", signature);
+            return { signature };
+
+        } catch (signError: unknown) {
+            console.error('[litSigningService] Error during final pkpSign call (transaction):', signError);
+            const message = signError instanceof Error ? signError.message : 'Unknown error during pkpSign for transaction.';
+            return { error: `Failed to sign transaction: ${message}` };
+        }
+    } else {
+        return { error: "Failed to obtain session signatures for transaction signing (unexpected state)." };
     }
 }
 

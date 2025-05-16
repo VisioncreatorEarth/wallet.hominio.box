@@ -1,6 +1,15 @@
 <script lang="ts">
 	let { children } = $props();
-	import { createPublicClient, http, type PublicClient, type Hex, type Address } from 'viem';
+	import {
+		createPublicClient,
+		http,
+		type PublicClient,
+		type Hex,
+		type Address,
+		type TransactionSerializable,
+		type Signature as ViemSignature,
+		serializeTransaction
+	} from 'viem';
 	import { gnosis } from 'viem/chains';
 	import { onDestroy, onMount, setContext } from 'svelte';
 	import { writable, type Writable } from 'svelte/store';
@@ -10,13 +19,14 @@
 
 	import { initializeLitClient } from '$lib/wallet/lit-connect';
 	import type { LitNodeClient } from '@lit-protocol/lit-node-client';
-	import { disconnectWeb3 } from '@lit-protocol/auth-browser'; // Import disconnectWeb3
+	import { disconnectWeb3 } from '@lit-protocol/auth-browser';
 	import { authClient } from '$lib/client/betterauth-client';
 	import { browser } from '$app/environment';
-	import Signer from '$lib/components/Signer.svelte'; // Renamed from SignMessage.svelte
+	import Signer from '$lib/components/Signer.svelte';
 	import {
 		signMessageWithPkp,
-		executeLitActionWithPkp
+		executeLitActionWithPkp,
+		signTransactionWithPkp
 	} from '$lib/wallet/services/litSigningService';
 	import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
 	import type {
@@ -24,11 +34,14 @@
 		ExecuteEventDetail,
 		SimplifiedSignMessageUiParams,
 		SimplifiedExecuteLitActionUiParams,
-		ActionResultDetail
+		SimplifiedSignTransactionUiParams,
+		ActionResultDetail,
+		SignTransactionActionParams,
+		SignTransactionActionResultDetail
 	} from '$lib/wallet/actionTypes';
 	import { example42LitActionCode } from '$lib/wallet/lit-actions/example-42';
 	import type { ExecuteJsResponse } from '@lit-protocol/types';
-	import Modal from '$lib/components/Modal.svelte'; // ADDED: Import new Modal component
+	import Modal from '$lib/components/Modal.svelte';
 
 	let publicClientInstance: PublicClient;
 	const litClientStore: Writable<LitNodeClient | null> = writable(null);
@@ -47,8 +60,10 @@
 	let isActionModalOpen = $state(false);
 	let isProcessingAction = $state(false);
 	let currentActionRequest = $state<RequestActionDetail | null>(null);
-	let actionPrimaryResult = $state<Hex | ExecuteJsResponse | null>(null);
+	let actionPrimaryResult = $state<Hex | ExecuteJsResponse | ViemSignature | null>(null);
 	let actionErrorDetail = $state<string | null>(null);
+	let transactionSendHash = $state<Hex | null>(null);
+	let transactionReceiptForDisplay = $state<import('viem').TransactionReceipt | null>(null);
 
 	let lastSuccessfullyProcessedSearchParamsString = $state<string | null>(null);
 
@@ -180,6 +195,62 @@
 						$state.snapshot(currentActionRequest)
 					);
 				}
+			} else if (eventDetail.type === 'signTransaction') {
+				const uiParams = eventDetail.uiParams as SimplifiedSignTransactionUiParams;
+				const result = await signTransactionWithPkp(
+					uiParams.transaction,
+					pkpTokenId,
+					pkpPublicKey as Hex,
+					formattedPasskeyRawId,
+					passkeyVerifierContractAddress as Address
+				);
+				if (result && 'signature' in result && result.signature) {
+					actionPrimaryResult = result.signature;
+					actionErrorDetail = null;
+					console.log('[Layout] signTransaction PKP signing success, signature:', result.signature);
+
+					// Now, attempt to send the transaction
+					try {
+						const publicClient = $viemPublicClientStore;
+						if (!publicClient) {
+							throw new Error('Public client not available to send transaction.');
+						}
+						const signedSerializedTx = serializeTransaction(uiParams.transaction, result.signature);
+						console.log('[Layout] Attempting to send raw transaction:', signedSerializedTx);
+						const hash = await publicClient.sendRawTransaction({
+							serializedTransaction: signedSerializedTx
+						});
+						console.log('[Layout] Transaction sent successfully! Hash:', hash);
+						transactionSendHash = hash; // Store the transaction hash
+
+						// ADDED: Wait for transaction receipt
+						console.log('[Layout] Waiting for transaction receipt for hash:', hash);
+						const receipt = await publicClient.waitForTransactionReceipt({
+							hash
+						});
+						console.log('[Layout] Transaction receipt received:', receipt);
+						transactionReceiptForDisplay = receipt; // Store the receipt
+						// We might clear actionPrimaryResult here if we only want to show the hash as the final result of this step
+						// Or keep it if the Signer component wants to display both signature and hash
+					} catch (sendError: any) {
+						console.error('[Layout] Error sending transaction or waiting for receipt:', sendError);
+						actionErrorDetail = `Failed to send/confirm transaction: ${sendError.message || 'Unknown error'}`;
+						transactionSendHash = null; // Clear hash on send error
+						transactionReceiptForDisplay = null; // Clear receipt on error
+						// The signature (actionPrimaryResult) remains, so user could retry sending elsewhere if needed.
+					}
+				} else if (result && 'error' in result && result.error) {
+					actionErrorDetail = result.error;
+					actionPrimaryResult = null;
+					transactionSendHash = null;
+					transactionReceiptForDisplay = null;
+					console.log('[Layout] signTransaction PKP signing failed:', result.error);
+				} else {
+					actionErrorDetail = 'Unexpected result from signTransactionWithPkp';
+					transactionSendHash = null;
+					transactionReceiptForDisplay = null;
+					console.log('[Layout] signTransaction PKP signing unexpected result.');
+				}
 			}
 		} catch (e: any) {
 			console.error('Error processing action:', e);
@@ -196,6 +267,16 @@
 					resultToStore = { type: 'signMessage', error: actionErrorDetail };
 				} else if (currentActionReqSnapshot?.type === 'executeLitAction') {
 					resultToStore = { type: 'executeLitAction', error: actionErrorDetail };
+				} else if (currentActionReqSnapshot?.type === 'signTransaction') {
+					// For signTransaction, the result includes the signature and potentially the transaction hash and receipt
+					const sigResult = actionPrimaryResult as ViemSignature | null;
+					resultToStore = {
+						type: 'signTransaction',
+						signature: sigResult || undefined, // Store signature even if sending failed
+						transactionHash: transactionSendHash || undefined,
+						transactionReceipt: transactionReceiptForDisplay || undefined,
+						error: actionErrorDetail // Error will be present here
+					} as SignTransactionActionResultDetail; // Ensure all fields of the type are covered or optional
 				}
 				console.log(
 					'[Layout finally] Computed result for store (error case):',
@@ -210,11 +291,25 @@
 				} else if (
 					currentActionReqSnapshot?.type === 'executeLitAction' &&
 					typeof actionPrimaryResult === 'object' &&
-					actionPrimaryResult !== null
+					actionPrimaryResult !== null &&
+					('response' in actionPrimaryResult || 'logs' in actionPrimaryResult)
 				) {
 					resultToStore = {
 						type: 'executeLitAction',
 						result: actionPrimaryResult as ExecuteJsResponse
+					};
+				} else if (
+					currentActionReqSnapshot?.type === 'signTransaction' &&
+					typeof actionPrimaryResult === 'object' &&
+					actionPrimaryResult !== null &&
+					'r' in actionPrimaryResult &&
+					's' in actionPrimaryResult
+				) {
+					resultToStore = {
+						type: 'signTransaction',
+						signature: actionPrimaryResult as ViemSignature,
+						transactionHash: transactionSendHash || undefined, // Ensure hash is included in success case
+						transactionReceipt: transactionReceiptForDisplay || undefined // ADDED
 					};
 				}
 				console.log(
@@ -236,7 +331,9 @@
 		actionPrimaryResult = null;
 		actionErrorDetail = null;
 		currentActionRequest = null;
-		currentProcessResultStore.set(null); // Also clear the store
+		transactionSendHash = null; // Clear transaction hash as well
+		transactionReceiptForDisplay = null; // ADDED: Clear receipt
+		currentProcessResultStore.set(null);
 		console.log('[Layout] handleClearActionResult: currentProcessResultStore set to null');
 	}
 
@@ -313,8 +410,34 @@
 		isActionModalOpen = true;
 	}
 
+	// New function to open modal for signing transactions
+	function openSignTransactionModal(
+		transaction: TransactionSerializable,
+		displayInfo?: SignTransactionActionParams['transactionDisplayInfo']
+	) {
+		if (!currentPkpData) return;
+		currentActionRequest = {
+			type: 'signTransaction',
+			params: {
+				transaction: transaction,
+				transactionDisplayInfo: displayInfo,
+				pkpPublicKey: currentPkpData.pubKey as Hex,
+				passkeyRawId: currentPkpData.rawId as Hex,
+				passkeyVerifierContractAddress: currentPkpData.passkeyVerifierContract as Address,
+				pkpTokenId: currentPkpData.pkpTokenId
+			}
+		};
+		actionPrimaryResult = null;
+		actionErrorDetail = null;
+		transactionSendHash = null; // Reset transaction hash
+		transactionReceiptForDisplay = null; // ADDED: Reset transaction receipt
+		currentProcessResultStore.set(null);
+		isActionModalOpen = true;
+	}
+
 	setContext('openSignMessageModal', openSignMessageModal);
 	setContext('openExecuteLitActionModal', openExecuteLitActionModal);
+	setContext('openSignTransactionModal', openSignTransactionModal);
 
 	// Effect to process URL query parameters for actions
 	$effect(() => {
@@ -336,6 +459,10 @@
 				let cid: string | undefined;
 				let jsParamsString: string | null;
 				let jsParamsObject: Record<string, unknown> | undefined;
+				let transactionString: string | null;
+				let transactionObject: TransactionSerializable | undefined;
+				let displayInfoString: string | null;
+				let displayInfoObject: SignTransactionActionParams['transactionDisplayInfo'] | undefined;
 				let actionTaken = false;
 
 				if (actionTypeFromUrl === 'signMessage') {
@@ -366,6 +493,28 @@
 							actionTaken = true;
 						} catch (e) {
 							console.error('[Layout URL Effect] Error decoding CID from URL:', e);
+						}
+					}
+				} else if (actionTypeFromUrl === 'signTransaction') {
+					transactionString = currentUrl.searchParams.get('transaction');
+					displayInfoString = currentUrl.searchParams.get('displayInfo');
+					if (transactionString) {
+						try {
+							transactionObject = JSON.parse(decodeURIComponent(transactionString));
+							if (displayInfoString) {
+								try {
+									displayInfoObject = JSON.parse(decodeURIComponent(displayInfoString));
+								} catch (e) {
+									console.error('[Layout URL Effect] Error parsing displayInfo:', e);
+								}
+							}
+							openSignTransactionModal(
+								transactionObject as TransactionSerializable,
+								displayInfoObject
+							);
+							actionTaken = true;
+						} catch (e) {
+							console.error('[Layout URL Effect] Error parsing transaction:', e);
 						}
 					}
 				}
@@ -601,7 +750,11 @@
 				onClose={triggerModalCloseSequence}
 				title={currentActionRequest.type === 'signMessage'
 					? 'Sign a Message'
-					: 'Execute Lit Action'}
+					: currentActionRequest.type === 'executeLitAction'
+						? 'Execute Lit Action'
+						: currentActionRequest.type === 'signTransaction'
+							? 'Sign Transaction'
+							: 'Confirm Action'}
 			>
 				<Signer
 					actionRequest={currentActionRequest}

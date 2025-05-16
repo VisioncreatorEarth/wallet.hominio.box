@@ -1,7 +1,7 @@
-import type { Hex, Address } from 'viem';
+import type { Hex, Address, TransactionSerializable, Signature } from 'viem';
 import type { ExecuteJsResponse } from '@lit-protocol/types';
 
-export type ActionType = 'signMessage' | 'executeLitAction';
+export type ActionType = 'signMessage' | 'executeLitAction' | 'signTransaction';
 
 // Base parameters including PKP details, prepared by the layout/orchestrator
 export interface BaseActionParams {
@@ -20,8 +20,18 @@ export interface ExecuteLitActionParams extends BaseActionParams {
     jsParams: Record<string, unknown>;
 }
 
+export interface SignTransactionActionParams extends BaseActionParams {
+    transaction: TransactionSerializable;
+    transactionDisplayInfo?: {
+        description?: string;
+        tokenSymbol?: string;
+        amount?: string;
+        recipient?: string;
+    };
+}
+
 // The comprehensive request detail passed to the SignMessage/Action modal component
-export type ActionParams = SignMessageActionParams | ExecuteLitActionParams;
+export type ActionParams = SignMessageActionParams | ExecuteLitActionParams | SignTransactionActionParams;
 export interface RequestActionDetail {
     type: ActionType;
     params: ActionParams; // Contains full BaseActionParams + specific params
@@ -37,7 +47,11 @@ export interface SimplifiedExecuteLitActionUiParams {
     jsParams: Record<string, unknown>;
 }
 
-export type ExecuteEventUiParams = SimplifiedSignMessageUiParams | SimplifiedExecuteLitActionUiParams;
+export interface SimplifiedSignTransactionUiParams {
+    transaction: TransactionSerializable;
+}
+
+export type ExecuteEventUiParams = SimplifiedSignMessageUiParams | SimplifiedExecuteLitActionUiParams | SimplifiedSignTransactionUiParams;
 
 export interface ExecuteEventDetail {
     type: ActionType;
@@ -58,4 +72,12 @@ export interface ExecuteLitActionResultDetail {
     error?: string;
 }
 
-export type ActionResultDetail = SignMessageResultDetail | ExecuteLitActionResultDetail; 
+export interface SignTransactionActionResultDetail {
+    type: 'signTransaction';
+    signature?: Signature;
+    transactionHash?: Hex;
+    transactionReceipt?: import('viem').TransactionReceipt;
+    error?: string;
+}
+
+export type ActionResultDetail = SignMessageResultDetail | ExecuteLitActionResultDetail | SignTransactionActionResultDetail; 
