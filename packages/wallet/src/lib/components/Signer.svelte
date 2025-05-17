@@ -288,17 +288,23 @@
 			? (processResult as SignTransactionActionResultDetail).transactionReceipt
 			: null
 	);
-	const transactionStatus = $derived(() => {
-		if (actionRequest?.type !== 'signTransaction' || !currentTransactionReceipt) return null;
-		return currentTransactionReceipt.status === 'success'
-			? 'Confirmed (Success)'
-			: 'Failed (Reverted on-chain)';
+
+	// Changed to use $derived.by for explicit derived store definition
+	let transactionOutcomeForDisplay = $derived.by(() => {
+		if (actionRequest?.type !== 'signTransaction' || !currentTransactionReceipt) {
+			return null;
+		}
+		if (currentTransactionReceipt.status === 'success') {
+			return { status: 'success', message: 'Confirmed (Success)' };
+		} else if (currentTransactionReceipt.status === 'reverted') {
+			return { status: 'reverted', message: 'Failed (Reverted on-chain)' };
+		}
+		return null;
 	});
 
 	const showResultView = $derived(
 		!!currentSignMessageResultSignature ||
 			!!currentLitActionResultObject ||
-			!!currentSignTransactionResultSignature ||
 			!!currentTransactionSendHash ||
 			!!currentErrorMessage
 	);
@@ -306,7 +312,6 @@
 	const isSuccessResult = $derived(
 		(!!currentSignMessageResultSignature ||
 			!!currentLitActionResultObject ||
-			!!currentSignTransactionResultSignature ||
 			!!currentTransactionSendHash) &&
 			(!currentTransactionReceipt || currentTransactionReceipt.status === 'success') &&
 			!currentErrorMessage
@@ -663,31 +668,25 @@
 								</div>
 							{/if}
 
-							{#if transactionStatus}
-								<div
-									class="mt-2 space-y-1 rounded-md border {currentTransactionReceipt?.status ===
-									'success'
-										? 'border-green-300 bg-green-50'
-										: 'border-red-300 bg-red-50'} p-3"
-								>
-									<h5
-										class="text-sm font-medium {currentTransactionReceipt?.status === 'success'
-											? 'text-green-700'
-											: 'text-red-700'}"
-									>
-										On-Chain Status
-									</h5>
-									<p
-										class="text-xs {currentTransactionReceipt?.status === 'success'
-											? 'text-green-600'
-											: 'text-red-600'}"
-									>
-										{transactionStatus}
-									</p>
-									{#if currentTransactionReceipt?.status === 'reverted' && currentTransactionReceipt.gasUsed}
-										<p class="text-xs text-red-500/80">
-											(Gas Used: {currentTransactionReceipt.gasUsed.toString()})
-										</p>
+							{#if transactionOutcomeForDisplay}
+								<div class="mt-2 text-center">
+									{#if transactionOutcomeForDisplay.status === 'success'}
+										<span
+											class="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm font-semibold text-green-700 shadow-sm"
+										>
+											{transactionOutcomeForDisplay.message}
+										</span>
+									{:else if transactionOutcomeForDisplay.status === 'reverted'}
+										<span
+											class="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-700 shadow-sm"
+										>
+											{transactionOutcomeForDisplay.message}
+										</span>
+										{#if currentTransactionReceipt?.gasUsed}
+											<p class="mt-1 text-xs text-red-500/80">
+												(Gas Used: {currentTransactionReceipt.gasUsed.toString()})
+											</p>
+										{/if}
 									{/if}
 								</div>
 							{/if}
@@ -959,18 +958,6 @@
 			</div>
 		{/if}
 
-		{#if currentSignTransactionResultSignature}
-			<div class="mt-4">
-				<h4 class="text-prussian-blue text-sm font-medium">Transaction Signature:</h4>
-				<pre
-					class="bg-timberwolf-1/40 text-prussian-blue/90 mt-1 w-full overflow-auto rounded-md p-2 text-xs break-words whitespace-pre-wrap">{JSON.stringify(
-						currentSignTransactionResultSignature,
-						(key, value) => (typeof value === 'bigint' ? value.toString() + 'n' : value),
-						2
-					)}</pre>
-			</div>
-		{/if}
-
 		{#if currentTransactionSendHash}
 			<div class="mt-4">
 				<h4 class="text-prussian-blue text-sm font-medium">Transaction Sent:</h4>
@@ -991,20 +978,25 @@
 			</div>
 		{/if}
 
-		{#if transactionStatus}
-			<div class="mt-4">
-				<h5 class="text-prussian-blue/90 text-sm font-medium">On-Chain Status:</h5>
-				<p
-					class="text-xs {currentTransactionReceipt?.status === 'success'
-						? 'text-green-600'
-						: 'text-red-600'}"
-				>
-					{transactionStatus}
-				</p>
-				{#if currentTransactionReceipt?.status === 'reverted' && currentTransactionReceipt.gasUsed}
-					<p class="text-xs text-red-500/80">
-						(Gas Used: {currentTransactionReceipt.gasUsed.toString()})
-					</p>
+		{#if transactionOutcomeForDisplay}
+			<div class="mt-3 text-center">
+				{#if transactionOutcomeForDisplay.status === 'success'}
+					<span
+						class="inline-flex items-center rounded-full bg-green-100 px-3.5 py-1.5 text-sm font-semibold text-green-700 shadow-md"
+					>
+						{transactionOutcomeForDisplay.message}
+					</span>
+				{:else if transactionOutcomeForDisplay.status === 'reverted'}
+					<span
+						class="inline-flex items-center rounded-full bg-red-100 px-3.5 py-1.5 text-sm font-semibold text-red-700 shadow-md"
+					>
+						{transactionOutcomeForDisplay.message}
+					</span>
+					{#if currentTransactionReceipt?.gasUsed}
+						<p class="mt-1 text-xs text-red-500/80">
+							(Gas Used: {currentTransactionReceipt.gasUsed.toString()})
+						</p>
+					{/if}
 				{/if}
 			</div>
 		{/if}
