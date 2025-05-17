@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { PUBLIC_BASE_URL } from '$env/static/public';
+import { PUBLIC_BASE_URL, PUBLIC_POLAR_PRODUCT_VIBECREATOR } from '$env/static/public';
 import { betterAuth } from "better-auth";
 import pkg from 'pg';
 import { pkpPasskeyServerPlugin } from './pkp-passkey-plugin';
@@ -58,8 +58,8 @@ export const auth = betterAuth({
                 checkout({
                     products: [
                         {
-                            productId: "b805589e-2382-49d1-9409-73e42baeb1c7",
-                            slug: "standard-plan"
+                            productId: PUBLIC_POLAR_PRODUCT_VIBECREATOR,
+                            slug: "vibe-creator"
                         }
                     ],
                     successUrl: "/me?tab=tokenBalance&checkout_id={CHECKOUT_ID}",

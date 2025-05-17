@@ -1,12 +1,13 @@
 <script lang="ts">
 	import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
-	// Assuming authClient type will be passed or defined globally, using 'any' for now.
-	// If authClient is from $lib/client/betterauth-client, its type could be imported.
+	// Imports for PUBLIC_POLAR_PRODUCT_VIBECREATOR and PUBLIC_POLAR_PRICE_VIBECREATOR removed as they are no longer used in the template
 
 	let { authClient, currentPkpData } = $props<{
 		authClient: any; // Replace with specific type if available
 		currentPkpData: ClientPkpPasskey | null;
 	}>();
+
+	// State variables for price fetching removed
 
 	async function goToBillingPortal() {
 		try {
@@ -19,12 +20,14 @@
 
 	async function startCheckout() {
 		try {
-			await authClient.checkout({ slug: 'standard-plan' });
+			await authClient.checkout({ slug: 'standard-plan' }); // Slug still configured server-side in auth.ts
 		} catch (error) {
 			console.error('[BillingCard] Error initiating checkout:', error);
 			alert('Could not start the checkout process. Please try again later.');
 		}
 	}
+
+	// $effect for fetching price removed
 </script>
 
 <div class="bg-background-surface rounded-xl p-6 shadow-xs">
@@ -49,11 +52,7 @@
 
 		<section>
 			<h3 class="font-playfair-display text-prussian-blue mb-4 text-xl">Purchase New Services</h3>
-			<p class="text-prussian-blue/80 mb-2 text-sm">
-				Standard Plan (Product ID: ...{currentPkpData?.pkpEthAddress
-					? 'b805...b1c7' // This is a placeholder, actual ID is in auth.ts
-					: 'N/A'} )
-			</p>
+			<p class="text-prussian-blue/80 mb-2 text-sm">VibeCreator Plan $100/month (excl. VAT)</p>
 			<p class="text-prussian-blue/70 mb-6 text-xs">
 				Access to all standard features, perfect for individual users.
 			</p>
@@ -61,7 +60,7 @@
 				onclick={startCheckout}
 				class="bg-persian-orange text-linen focus:ring-persian-orange/70 hover:bg-opacity-90 rounded-lg px-5 py-2.5 text-sm font-medium shadow-md transition-colors focus:ring-2 focus:outline-none"
 			>
-				Purchase Standard Plan
+				Purchase VibeCreator Plan
 			</button>
 		</section>
 	</div>
