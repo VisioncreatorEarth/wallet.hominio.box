@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { ClientPkpPasskey } from '$lib/client/pkp-passkey-plugin';
-	// Imports for PUBLIC_POLAR_PRODUCT_VIBECREATOR and PUBLIC_POLAR_PRICE_VIBECREATOR removed as they are no longer used in the template
 
 	let { authClient, currentPkpData } = $props<{
 		authClient: any; // Replace with specific type if available

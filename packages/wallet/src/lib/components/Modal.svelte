@@ -36,9 +36,18 @@
 				onClose?.();
 			}
 		}}
+		onkeydown={(event: KeyboardEvent) => {
+			if (
+				event.target === event.currentTarget &&
+				(event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar')
+			) {
+				onClose?.();
+			}
+		}}
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="modal-title"
+		tabindex="-1"
 	>
 		<div
 			class="bg-background-surface w-full transform rounded-t-3xl p-6 shadow-2xl transition-all duration-300 ease-in-out sm:max-w-lg sm:rounded-3xl {isOpen
