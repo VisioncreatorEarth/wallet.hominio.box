@@ -19,7 +19,7 @@
 
 	async function startCheckout() {
 		try {
-			await authClient.checkout({ slug: 'standard-plan' }); // Slug still configured server-side in auth.ts
+			await authClient.checkout({ slug: 'vibe-creator' });
 		} catch (error) {
 			console.error('[BillingCard] Error initiating checkout:', error);
 			alert('Could not start the checkout process. Please try again later.');
